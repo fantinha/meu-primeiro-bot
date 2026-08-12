@@ -2732,7 +2732,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.3.5';
+  const VERSION = '1.3.7';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -4623,6 +4623,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     // recriado pelo watchdog — sem a guarda, os envios duplicariam).
     startLootTimers();
     // Checa se saiu versão nova (agora e a cada 1 hora).
+    try {
+      const verEl = ui.root && ui.root.querySelector('.sah-ver');
+      if (verEl) verEl.textContent = 'v' + runningVersion();
+    } catch (_) {}
     checkForUpdate();
     setInterval(checkForUpdate, 60 * 60 * 1000);
   }
@@ -4634,20 +4638,35 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const p = String(v || '').split('.').map((x) => parseInt(x, 10) || 0);
     return (p[0] || 0) * 1000000 + (p[1] || 0) * 1000 + (p[2] || 0);
   }
+  function runningVersion() {
+    try {
+      if (window.__capBotMeta && window.__capBotMeta.version) return String(window.__capBotMeta.version);
+    } catch (_) {}
+    return VERSION;
+  }
+
+  function dismissUpdateUI() {
+    try {
+      const b = document.getElementById('cap-update-banner');
+      if (b) b.remove();
+    } catch (_) {}
+    try {
+      const tag = ui.root && ui.root.querySelector('.sah-ver-tag');
+      if (tag) tag.style.display = 'none';
+    } catch (_) {}
+  }
+
   function applyVersionTag(latest) {
     const tag = ui.root && ui.root.querySelector('.sah-ver-tag');
     if (!tag) return;
-    if (verNum(latest) > verNum(VERSION)) {
+    const cur = runningVersion();
+    if (latest && verNum(latest) > verNum(cur)) {
       tag.style.display = '';
       tag.textContent = 'v' + latest + ' ↑';
-      tag.title = 'Versão desatualizada. Nova: v' + latest +
-        '. Clique em ATUALIZAR no aviso do jogo ou no popup da extensão.';
-      if (!bot.updateNotified) {
-        bot.updateNotified = true;
-        notify('Nova versão do CAP (v' + latest + ') disponível! Clique em ATUALIZAR no aviso ou no ícone da extensão.');
-      }
+      tag.title = 'Nova: v' + latest + ' (rodando v' + cur + '). Clique em ATUALIZAR e dê F5.';
     } else {
       tag.style.display = 'none';
+      dismissUpdateUI();
     }
   }
   function requestUpdateCheck() {
@@ -4684,15 +4703,24 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const res = await requestUpdateCheck();
       if (!res || !res.ok || !res.data) return;
       const d = res.data;
-      if (d.latest) applyVersionTag(d.latest);
-      if (d.hasUpdate && !bot.updateNotified) {
+      const latest = d.latest;
+      if (!latest) return;
+      const cur = runningVersion();
+      const needs = verNum(latest) > verNum(cur);
+      applyVersionTag(latest);
+      if (!needs) {
+        bot.updateNotified = false;
+        dismissUpdateUI();
+        return;
+      }
+      if (!bot.updateNotified) {
         bot.updateNotified = true;
         notify(
-          'Nova versão do CAP (v' + d.latest + ') disponível!' +
+          'Nova versão do CAP (v' + latest + ') disponível!' +
           (d.message ? ' ' + d.message : '') +
-          ' Clique em ATUALIZAR no aviso ou no ícone da extensão.'
+          ' Clique em ATUALIZAR e dê F5.'
         );
-        showUpdateBanner(d.latest, d.message || '');
+        showUpdateBanner(latest, d.message || '');
       }
     } catch (_) {}
   }
@@ -4718,8 +4746,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         const r = await requestForceUpdate();
         if (r && r.ok) {
           btn.textContent = 'OK — F5';
-          notify('Bot atualizado para v' + ((r.data && r.data.version) || latest) + '. Pressione F5.');
-          setTimeout(() => { try { location.reload(); } catch (_) {} }, 800);
+          dismissUpdateUI();
+          notify('Bot atualizado para v' + ((r.data && r.data.version) || latest) + '. Recarregando…');
+          setTimeout(() => { try { location.reload(); } catch (_) {} }, 600);
         } else {
           btn.disabled = false;
           btn.textContent = 'ATUALIZAR';
