@@ -8127,6 +8127,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   let daState = daCreateState();
 
+  const DA_CAPTURE_MAX_FRAMES = 2000;
+
+  let daCapture = {
+    active: false,
+    startedAt: null,
+    frames: [],
+  };
+
   let daPaintQueued = false;
   let daCollapsed =
     localStorage.getItem('cap-da-collapsed') === '1';
@@ -8716,6 +8724,54 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
 
     return out;
+  }
+
+  function daCaptureFrame(opcode, b64, source) {
+    if (!daCapture.active) {
+      return;
+    }
+
+    if (opcode !== 0x1c && opcode !== 0x19 && opcode !== 0x12) {
+      return;
+    }
+
+    if (daCapture.frames.length >= DA_CAPTURE_MAX_FRAMES) {
+      daCapture.active = false;
+      daState.lastErr = 'limite de captura atingido';
+      return;
+    }
+
+    daCapture.frames.push({
+      at: Date.now(),
+      opcode,
+      source,
+      b64,
+    });
+  }
+
+  function daExportCapture() {
+    if (daCapture.frames.length === 0) {
+      return;
+    }
+
+    const payload = {
+      format: 'cap-damage-capture-v1',
+      capturedAt: new Date().toISOString(),
+      startedAt: daCapture.startedAt,
+      names: [...daState.names.entries()],
+      partyIds: [...daState.partyIds],
+      frames: daCapture.frames,
+    };
+
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload)], { type: 'application/json' })
+    );
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'cap-damage-capture-' + Date.now() + '.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function DaReader(buf) {
@@ -9454,6 +9510,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     daState.lastOp =
       opcode;
 
+    daCaptureFrame(opcode, b64, source);
+
     if (
       opcode === 0x1c
     ) {
@@ -9825,6 +9883,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       'Reset' +
       '</button>' +
 
+      '<button type="button" class="da-capture">' +
+      (daCapture.active ? 'Parar' : 'Capturar') +
+      '</button>' +
+
+      '<button type="button" class="da-export"' +
+      (daCapture.frames.length === 0 ? ' disabled' : '') +
+      '>' +
+      'Exportar (' + daCapture.frames.length + ')' +
+      '</button>' +
+
       '</header>' +
 
       '<div class="da-body">' +
@@ -9888,6 +9956,28 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         }
       );
     }
+
+    const capture = root.querySelector('.da-capture');
+
+    if (capture) {
+      capture.addEventListener('click', () => {
+        if (daCapture.active) {
+          daCapture.active = false;
+        } else {
+          daCapture.active = true;
+          daCapture.startedAt = new Date().toISOString();
+          daCapture.frames = [];
+        }
+
+        daPaint();
+      });
+    }
+
+    const exportButton = root.querySelector('.da-export');
+
+    if (exportButton) {
+      exportButton.addEventListener('click', daExportCapture);
+    }
   }
 
   // =====================================================================
@@ -9941,7 +10031,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     'text-transform:uppercase;' +
     '}' +
 
-    '.da-reset{' +
+    '.da-reset,' +
+    '.da-capture,' +
+    '.da-export{' +
     'border:0;' +
     'background:transparent;' +
     'color:#cdbe91;' +
