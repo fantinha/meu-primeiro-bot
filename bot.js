@@ -7563,6 +7563,20 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return h + 'h' + (mm ? mm + 'm' : '');
   }
 
+  function primaryXpRateOf(run) {
+    if (!run || typeof run !== 'object') return null;
+    if (run.rawXpH != null && Number.isFinite(run.rawXpH)) return run.rawXpH;
+    if (run.xpH != null && Number.isFinite(run.xpH)) return run.xpH;
+    return null;
+  }
+
+  function primaryXpLabelOf(run) {
+    if (!run || typeof run !== 'object') return '';
+    if (run.rawXpH != null && Number.isFinite(run.rawXpH)) return 'Raw XP/h';
+    if (run.xpH != null && Number.isFinite(run.xpH)) return 'XP/h';
+    return '';
+  }
+
   function averageRuns(runs) {
     if (!runs || !runs.length) return null;
     const keys = ['durationSec', 'xp', 'xpH', 'rawXp', 'rawXpH', 'balance', 'balanceH', 'lootTotal', 'kills'];
@@ -7647,8 +7661,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       // dedup / upgrade: se última run recente só tem tempo, substitui com dados completos
       const last = entry.runs[0];
       if (last && (Date.now() - (last.at || 0)) < 180000) {
-        const lastPoor = last.xpH == null && last.balanceH == null;
-        const runRich = run.xpH != null || run.balanceH != null;
+        const lastPoor = primaryXpRateOf(last) == null && last.balanceH == null;
+        const runRich = primaryXpRateOf(run) != null || run.balanceH != null;
         const closeDuration =
           typeof last.durationSec === 'number' && Number.isFinite(last.durationSec) &&
           typeof run.durationSec === 'number' && Number.isFinite(run.durationSec) &&
@@ -7668,7 +7682,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           saveConfig();
           log(
             'Métricas atualizadas [' + mode.toUpperCase() + '] "' + hunt + '": ' +
-            'XP/h ' + fmtRate(run.xpH) +
+            primaryXpLabelOf(run) + ' ' + fmtRate(primaryXpRateOf(run)) +
             ' · Gold/h ' + fmtRate(run.balanceH) +
             ' · ' + fmtDurShort(run.durationSec)
           );
@@ -7683,7 +7697,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           try { updateHuntMetricsUI(); } catch (_) {}
           return true;
         }
-        const sameXp = last.xpH === run.xpH && last.balanceH === run.balanceH;
+        const sameXp = primaryXpRateOf(last) === primaryXpRateOf(run) && last.balanceH === run.balanceH;
         if (sameXp) return false;
       }
       entry.runs.unshift(run);
@@ -7693,7 +7707,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       saveConfig();
       log(
         'Métricas salvas [' + mode.toUpperCase() + '] "' + hunt + '": ' +
-        'XP/h ' + fmtRate(run.xpH) +
+        primaryXpLabelOf(run) + ' ' + fmtRate(primaryXpRateOf(run)) +
         ' · Gold/h ' + fmtRate(run.balanceH) +
         ' · ' + fmtDurShort(run.durationSec)
       );
@@ -7712,14 +7726,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const avg = entry.avg || averageRuns(entry.runs);
     const a = latest;
     const parts = [];
-    if (a.xpH != null) parts.push(fmtRate(a.xpH) + ' XP/h');
+    if (primaryXpRateOf(a) != null) parts.push(fmtRate(primaryXpRateOf(a)) + ' ' + primaryXpLabelOf(a));
     if (a.balanceH != null) parts.push(fmtRate(a.balanceH) + ' gold/h');
     if (a.durationSec != null) parts.push('~' + fmtDurShort(a.durationSec));
     if (!parts.length) return '';
     let line = parts.join(' - ');
     if (avg && avg.n > 1) {
       const avgParts = [];
-      if (avg.xpH != null) avgParts.push(fmtRate(avg.xpH) + ' XP/h');
+      if (primaryXpRateOf(avg) != null) avgParts.push(fmtRate(primaryXpRateOf(avg)) + ' ' + primaryXpLabelOf(avg));
       if (avg.balanceH != null) avgParts.push(fmtRate(avg.balanceH) + ' gold/h');
       if (avgParts.length) line += ' | media ' + avg.n + ': ' + avgParts.join(' - ');
     }
