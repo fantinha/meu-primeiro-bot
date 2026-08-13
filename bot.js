@@ -9067,6 +9067,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               runtimePlayerId:
                 attacker || 0,
 
+              asDealt: true,
+
               amount,
 
               element:
@@ -9120,6 +9122,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           ) {
             result.takenHits.push({
               runtimePlayerId,
+
+              asTaken: true,
 
               amount,
 
@@ -9320,6 +9324,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             result.takenHits.push({
               runtimePlayerId,
 
+              asTaken: true,
+
               amount,
 
               element:
@@ -9374,6 +9380,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             result.dealtHits.push({
               runtimePlayerId:
                 attacker || 0,
+
+              asDealt: true,
 
               amount,
 
