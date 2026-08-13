@@ -6804,7 +6804,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       lastUnit = r.unit;
       if (remaining > 0) {
         log(`Imbui-buy: ${r.bought}x compradas; procurando outra oferta para ${remaining}x de "${name}"...`);
-        await sleep(700);
+        await sleep(250);
       }
     }
     if (remaining > 0) {
@@ -6891,37 +6891,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const budget = Math.max(0, parseInt(cfg.imbueMaxBudget, 10) || 0);
       log(`Imbui-buy: ${key} / ${tier} ×${sets}` + (budget ? ` (orçamento ${fmtGold(budget)})` : ''));
 
-      // 1) Cota primeiro
-      const quote = await quoteImbue(key, tier, sets);
-      if (!quote.ok) {
-        closeMarketWindow();
-        notify('Não deu pra cotar todos os itens — compra cancelada');
-        if (ui && ui.imbueResult) {
-          ui.imbueResult.textContent = 'Cotação incompleta. Compra cancelada.\n' +
-            (quote.items || []).map((it) => `• ${it.name}: ${it.error || fmtGold(it.subtotal)}`).join('\n');
-        }
-        return quote;
-      }
-      const gold = find.goldValue();
-      if (gold !== null && quote.total > gold) {
-        closeMarketWindow();
-        notify(`Gold insuficiente: precisa ${fmtGold(quote.total)}, tem ${fmtGold(gold)}`);
-        if (ui && ui.imbueResult) ui.imbueResult.textContent = `Total ${fmtGold(quote.total)} > gold ${fmtGold(gold)} — não comprei.`;
-        return { ok: false, error: 'gold insuficiente', quote };
-      }
-      if (budget > 0 && quote.total > budget) {
-        closeMarketWindow();
-        notify(`Acima do orçamento: ${fmtGold(quote.total)} > ${fmtGold(budget)}`);
-        if (ui && ui.imbueResult) ui.imbueResult.textContent = `Total ${fmtGold(quote.total)} > orçamento ${fmtGold(budget)} — não comprei.`;
-        return { ok: false, error: 'orçamento', quote };
-      }
+      // Compra direta: a cotação é exclusiva do botão de consulta. Assim que
+      // o usuário pede compra, cada material é buscado e comprado na sequência.
+      const mats = imbueMaterialList(key, tier, sets);
+      if (!mats) return { ok: false, error: 'imbuement desconhecido' };
+      if (budget > 0) log(`Imbui-buy: orçamento configurado em ${fmtGold(budget)} (compra direta, sem cotação prévia)`);
 
-      // 2) Compra item a item
+      // Compra item a item
       const results = [];
-      for (const it of quote.items) {
+      for (const it of mats) {
         const r = await buyMarketItemTotal(it.name, it.qty);
         results.push(r);
-        await sleep(600);
+        await sleep(250);
       }
       closeMarketWindow();
       const okN = results.filter((r) => r.ok).length;
@@ -6935,7 +6916,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             : `✖ ${r.name}: ${r.error || 'falhou'}${r.bought ? ` (${r.bought}/${r.qty} compradas; faltam ${r.remaining})` : ''}`
           ).join('\n') + `\n\nGasto estimado: ${fmtGold(spent)}`;
       }
-      return { ok: okN === results.length, results, spent, quote };
+      return { ok: okN === results.length, results, spent, quote: null };
     } catch (e) {
       log('Imbui-buy: erro — ' + (e && e.message ? e.message : e));
       try { closeMarketWindow(); } catch (_) {}
@@ -7835,6 +7816,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           // analyzer pode ter sumido — tenta mesmo assim
           recordHuntMetricsSnapshot('left');
           bot._metricsCapturedThisStay = true;
+        }
+        // A hunt terminou de fato. Salva as métricas antes e então limpa o
+        // Damage Analyzer para a próxima hunt começar do zero.
+        if (!nowIn && bot._metricsWasInHunt) {
+          try {
+            if (typeof daReset === 'function') {
+              daReset();
+              log('Damage Analyzer resetado ao finalizar a hunt');
+            }
+          } catch (_) {}
         }
         bot._metricsWasInHunt = nowIn;
       } catch (_) {}
