@@ -8081,30 +8081,49 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   // =====================================================================
-  // DAMAGE ANALYZER (v1.2.1) — funcional + debug de frames
+  // DAMAGE ANALYZER (v1.3.1) — parser estruturado, sem heurística no DPS
   // =====================================================================
+
   const DA_HOST = 'cap-damage-analyzer';
   const DA_DPS_WINDOW_MS = 1000;
+
   const DA_ELEMENTS = {
-    1: 'Earth', 2: 'Fire', 3: 'Ice', 4: 'Energy', 5: 'Mana',
-    6: 'Holy', 7: 'Death', 8: 'Physical', 9: 'Life Drain',
+    1: 'Earth',
+    2: 'Fire',
+    3: 'Ice',
+    4: 'Energy',
+    5: 'Mana',
+    6: 'Holy',
+    7: 'Death',
+    8: 'Physical',
+    9: 'Life Drain',
   };
 
   function daCreateState() {
     return {
       entities: new Map(),
+
       startedAt: null,
       updatedAt: null,
+
       names: new Map(),
-      partyIds: new Set(), // runtimePlayerIds conhecidos da party/hunt
+      partyIds: new Set(),
+
       frames: 0,
-      hits: 0,
+      parsedFrames: 0,
+      confirmedHits: 0,
+      invalidFrames: 0,
+
       lastOp: null,
       lastErr: null,
       lastLen: 0,
+      lastSource: '',
+      lastSpellStrings: [],
     };
   }
+
   let daState = daCreateState();
+
   let daPaintQueued = false;
   let daCollapsed = localStorage.getItem('cap-da-collapsed') === '1';
   let daDebug = localStorage.getItem('cap-da-debug') === '1';
@@ -8113,144 +8132,317 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return Math.round(n || 0).toLocaleString('pt-BR');
   }
 
+  function daNow() {
+    return performance.now();
+  }
+
   function daEnsure(id) {
     let b = daState.entities.get(id);
+
     if (!b) {
       b = {
         id,
-        dealtSum: 0, takenSum: 0,
-        dealtMax: 0, takenMax: 0,
-        dealtWin: [], takenWin: [],
-        dealtEl: new Map(), takenEl: new Map(),
+
+        dealtSum: 0,
+        takenSum: 0,
+
+        dealtMax: 0,
+        takenMax: 0,
+
+        dealtWin: [],
+        takenWin: [],
+
+        dealtEl: new Map(),
+        takenEl: new Map(),
       };
+
       daState.entities.set(id, b);
     }
+
     return b;
   }
 
   function daPeak(win, amount, at, prevMax) {
-    const next = win.filter((h) => at - h.at <= DA_DPS_WINDOW_MS);
-    next.push({ at, amount });
-    const cur = next.reduce((s, h) => s + h.amount, 0);
-    return { win: next, max: Math.max(prevMax, cur) };
+    const next = win.filter(
+      (h) => at - h.at <= DA_DPS_WINDOW_MS
+    );
+
+    next.push({
+      at,
+      amount,
+    });
+
+    const cur = next.reduce(
+      (sum, h) => sum + h.amount,
+      0
+    );
+
+    return {
+      win: next,
+      max: Math.max(prevMax, cur),
+    };
   }
 
   function daAddEl(map, el, amount) {
     if (el == null) return;
-    map.set(el, (map.get(el) || 0) + amount);
+
+    map.set(
+      el,
+      (map.get(el) || 0) + amount
+    );
   }
 
   function daIdOk(id) {
-    // Party real usa ids baixos; >=200 quase sempre lixo de parse
-    return typeof id === 'number' && id > 0 && id < 200;
+    return (
+      typeof id === 'number' &&
+      id > 0 &&
+      id < 200
+    );
   }
 
-  function daRecord(hits) {
-    if (!hits || !hits.length) return;
-    const at = Date.now();
+  function daRecord(hits, source) {
+    if (!hits || !hits.length) {
+      return false;
+    }
+
+    const at = daNow();
     let any = false;
+
     for (const h of hits) {
-      if (!h || !(h.amount > 0)) continue;
-      let id = (h.runtimePlayerId == null ? 0 : h.runtimePlayerId);
-      // Dealt sem attacker válido → ignora (evita "Desconhecido" inflado)
-      if (h.asDealt && !daIdOk(id)) continue;
-      // Taken com id inválido → ignora
-      if (h.asTaken && !daIdOk(id)) continue;
-      if (!daIdOk(id)) continue;
+      if (!h || !(h.amount > 0)) {
+        continue;
+      }
+
+      const id =
+        h.runtimePlayerId == null
+          ? 0
+          : h.runtimePlayerId;
+
+      if (!daIdOk(id)) {
+        continue;
+      }
+
       const b = daEnsure(id);
+
       if (h.asDealt) {
-        const p = daPeak(b.dealtWin, h.amount, at, b.dealtMax);
+        const p = daPeak(
+          b.dealtWin,
+          h.amount,
+          at,
+          b.dealtMax
+        );
+
         b.dealtSum += h.amount;
         b.dealtWin = p.win;
         b.dealtMax = p.max;
-        daAddEl(b.dealtEl, h.element, h.amount);
+
+        daAddEl(
+          b.dealtEl,
+          h.element,
+          h.amount
+        );
+
+        daState.confirmedHits++;
         any = true;
-        daState.hits++;
       }
+
       if (h.asTaken) {
-        const p = daPeak(b.takenWin, h.amount, at, b.takenMax);
+        const p = daPeak(
+          b.takenWin,
+          h.amount,
+          at,
+          b.takenMax
+        );
+
         b.takenSum += h.amount;
         b.takenWin = p.win;
         b.takenMax = p.max;
-        daAddEl(b.takenEl, h.element, h.amount);
+
+        daAddEl(
+          b.takenEl,
+          h.element,
+          h.amount
+        );
+
+        daState.confirmedHits++;
         any = true;
-        daState.hits++;
       }
     }
-    if (!any) return;
-    if (daState.startedAt == null) daState.startedAt = at;
+
+    if (!any) {
+      return false;
+    }
+
+    if (daState.startedAt == null) {
+      daState.startedAt = at;
+    }
+
     daState.updatedAt = at;
+    daState.lastSource = source || 'parser';
+
     daSchedulePaint();
+
+    return true;
   }
 
-  function daAvg(sum) {
-    if (!sum || daState.startedAt == null || daState.updatedAt == null) return 0;
-    const sec = Math.max((daState.updatedAt - daState.startedAt) / 1000, 1);
+  // DPS real:
+  // dano acumulado / tempo efetivamente decorrido
+  function daDps(sum) {
+    if (
+      !sum ||
+      daState.startedAt == null ||
+      daState.updatedAt == null
+    ) {
+      return 0;
+    }
+
+    const sec = Math.max(
+      (daState.updatedAt - daState.startedAt) / 1000,
+      0.001
+    );
+
     return sum / sec;
   }
 
   function daElChips(map, total) {
-    if (!map.size) return '<span class="da-el empty">—</span>';
+    if (!map.size) {
+      return '<span class="da-el empty">—</span>';
+    }
+
     const arr = [...map.entries()]
       .map(([el, amount]) => ({
-        el, amount,
-        label: DA_ELEMENTS[el] || ('E' + el),
-        pct: total > 0 ? Math.round((amount / total) * 100) : 0,
+        el,
+        amount,
+        label:
+          DA_ELEMENTS[el] ||
+          ('E' + el),
+        pct:
+          total > 0
+            ? Math.round(
+                (amount / total) * 100
+              )
+            : 0,
       }))
-      .sort((a, b) => b.amount - a.amount);
-    return '<span class="da-el">' + arr.map((e) =>
-      '<span class="da-chip" title="' + e.label + ': ' + daFmt(e.amount) + '">' +
-      e.label.slice(0, 3) + ' ' + e.pct + '%</span>'
-    ).join('') + '</span>';
+      .sort(
+        (a, b) => b.amount - a.amount
+      );
+
+    return (
+      '<span class="da-el">' +
+      arr
+        .map(
+          (e) =>
+            '<span class="da-chip" title="' +
+            e.label +
+            ': ' +
+            daFmt(e.amount) +
+            '">' +
+            e.label.slice(0, 3) +
+            ' ' +
+            e.pct +
+            '%</span>'
+        )
+        .join('') +
+      '</span>'
+    );
   }
 
   function daName(id) {
-    return daState.names.get(id) || (id === 0 ? 'Desconhecido' : ('Player #' + id));
+    return (
+      daState.names.get(id) ||
+      (id === 0
+        ? 'Desconhecido'
+        : 'Player #' + id)
+    );
   }
 
   function daProject() {
-    const hasParty = daState.partyIds && daState.partyIds.size > 0;
-    const hasNames = daState.names && daState.names.size > 0;
-    let rows = [...daState.entities.values()].filter((b) => daIdOk(b.id));
+    const hasParty =
+      daState.partyIds &&
+      daState.partyIds.size > 0;
+
+    const hasNames =
+      daState.names &&
+      daState.names.size > 0;
+
+    let rows = [
+      ...daState.entities.values(),
+    ].filter((b) => daIdOk(b.id));
+
     if (hasParty) {
-      rows = rows.filter((b) => daState.partyIds.has(b.id));
+      rows = rows.filter((b) =>
+        daState.partyIds.has(b.id)
+      );
     } else if (hasNames) {
-      rows = rows.filter((b) => daState.names.has(b.id));
+      rows = rows.filter((b) =>
+        daState.names.has(b.id)
+      );
     } else {
-      // Sem nomes: só top 6 com id <= 32 (evita Player #245 etc.)
       rows = rows
-        .filter((b) => b.id <= 32 && (b.dealtSum > 0 || b.takenSum > 0))
-        .sort((a, b) => (b.dealtSum + b.takenSum) - (a.dealtSum + a.takenSum))
+        .filter(
+          (b) =>
+            b.id <= 32 &&
+            (
+              b.dealtSum > 0 ||
+              b.takenSum > 0
+            )
+        )
+        .sort(
+          (a, b) =>
+            (
+              b.dealtSum +
+              b.takenSum
+            ) -
+            (
+              a.dealtSum +
+              a.takenSum
+            )
+        )
         .slice(0, 6);
     }
+
     return rows
       .map((b) => ({
         id: b.id,
         name: daName(b.id),
+
         dealtSum: b.dealtSum,
         dealtMax: b.dealtMax,
-        dealtAvg: daAvg(b.dealtSum),
+        dealtDps: daDps(b.dealtSum),
+
         takenSum: b.takenSum,
         takenMax: b.takenMax,
-        takenAvg: daAvg(b.takenSum),
+        takenDps: daDps(b.takenSum),
+
         dealtEl: b.dealtEl,
         takenEl: b.takenEl,
       }))
-      .sort((a, b) => b.dealtSum - a.dealtSum || b.takenSum - a.takenSum);
+      .sort(
+        (a, b) =>
+          b.dealtSum - a.dealtSum ||
+          b.takenSum - a.takenSum
+      );
   }
 
   function daReset() {
     const names = daState.names;
     const partyIds = daState.partyIds;
+
     daState = daCreateState();
+
     daState.names = names;
     daState.partyIds = partyIds;
+
     daSchedulePaint();
   }
 
   function daSchedulePaint() {
-    if (daPaintQueued) return;
+    if (daPaintQueued) {
+      return;
+    }
+
     daPaintQueued = true;
+
     requestAnimationFrame(() => {
       daPaintQueued = false;
       daPaint();
@@ -8258,106 +8450,448 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   function daPaint() {
-    const host = document.getElementById(DA_HOST);
-    if (!host || !host.shadowRoot) return;
-    const root = host.shadowRoot.querySelector('.da-root');
-    if (!root) return;
-    const rows = daProject();
-    const br =
-      'bridge ' + (daBridgeInfo.bv || '?') +
-      (daBridgeInfo.socket == null ? '' : (daBridgeInfo.socket ? ' · ws ON' : ' · ws OFF'));
-    const status =
-      br +
-      ' · frames ' + daState.frames +
-      ' · hits ' + daState.hits +
-      (daState.lastOp != null ? ' · op 0x' + daState.lastOp.toString(16) : '') +
-      (daState.lastLen ? ' · ' + daState.lastLen + 'B' : '') +
-      (daState.lastErr ? ' · err: ' + daState.lastErr : '');
+    const host =
+      document.getElementById(DA_HOST);
 
-    const body = rows.length === 0
-      ? '<div class="da-empty">Aguardando combate…</div><div class="da-status">' + status + '</div>'
-      : '<div class="da-list">' +
-          '<div class="da-head"><span></span><span>Dealt</span><span>Taken</span></div>' +
-          rows.map((r) =>
-            '<div class="da-row">' +
-              '<div class="da-name" title="' + r.name + '">' + r.name + '</div>' +
-              '<div class="da-metric">' +
-                '<div class="da-sum">' + daFmt(r.dealtSum) + '</div>' +
-                '<div class="da-dps">' + daFmt(r.dealtMax) + ' TOP</div>' +
-                '<div class="da-dps">' + daFmt(r.dealtAvg) + ' AVG</div>' +
-                daElChips(r.dealtEl, r.dealtSum) +
-              '</div>' +
-              '<div class="da-metric">' +
-                '<div class="da-sum">' + daFmt(r.takenSum) + '</div>' +
-                '<div class="da-dps">' + daFmt(r.takenMax) + ' TOP</div>' +
-                '<div class="da-dps">' + daFmt(r.takenAvg) + ' AVG</div>' +
-                daElChips(r.takenEl, r.takenSum) +
-              '</div>' +
+    if (!host || !host.shadowRoot) {
+      return;
+    }
+
+    const root =
+      host.shadowRoot.querySelector(
+        '.da-root'
+      );
+
+    if (!root) {
+      return;
+    }
+
+    const rows = daProject();
+
+    const elapsed =
+      daState.startedAt != null &&
+      daState.updatedAt != null
+        ? (
+            daState.updatedAt -
+            daState.startedAt
+          ) / 1000
+        : 0;
+
+    const status =
+      'bridge ' +
+      (daBridgeInfo.bv || '?') +
+      (
+        daBridgeInfo.socket == null
+          ? ''
+          : (
+              daBridgeInfo.socket
+                ? ' · ws ON'
+                : ' · ws OFF'
+            )
+      ) +
+      ' · tempo ' +
+      Math.floor(elapsed) +
+      's' +
+      ' · frames ' +
+      daState.frames +
+      ' · parsed ' +
+      daState.parsedFrames +
+      ' · hits ' +
+      daState.confirmedHits +
+      ' · inválidos ' +
+      daState.invalidFrames +
+      (
+        daState.lastOp != null
+          ? ' · op 0x' +
+            daState.lastOp.toString(16)
+          : ''
+      ) +
+      (
+        daState.lastLen
+          ? ' · ' +
+            daState.lastLen +
+            'B'
+          : ''
+      ) +
+      (
+        daState.lastSource
+          ? ' · ' +
+            daState.lastSource
+          : ''
+      ) +
+      (
+        daState.lastErr
+          ? ' · err: ' +
+            daState.lastErr
+          : ''
+      );
+
+    const body =
+      rows.length === 0
+        ? (
+            '<div class="da-empty">' +
+            'Aguardando combate…' +
+            '</div>' +
+            '<div class="da-status">' +
+            status +
             '</div>'
-          ).join('') +
-        '</div><div class="da-status">' + status + '</div>';
+          )
+        : (
+            '<div class="da-list">' +
+            '<div class="da-head">' +
+            '<span></span>' +
+            '<span>Dealt</span>' +
+            '<span>Taken</span>' +
+            '</div>' +
+
+            rows
+              .map(
+                (r) =>
+                  '<div class="da-row">' +
+
+                  '<div class="da-name" title="' +
+                  r.name +
+                  '">' +
+                  r.name +
+                  '</div>' +
+
+                  '<div class="da-metric">' +
+
+                  '<div class="da-sum">' +
+                  daFmt(r.dealtSum) +
+                  '</div>' +
+
+                  '<div class="da-dps">' +
+                  daFmt(r.dealtMax) +
+                  ' BURST 1s' +
+                  '</div>' +
+
+                  '<div class="da-dps">' +
+                  daFmt(r.dealtDps) +
+                  ' DPS' +
+                  '</div>' +
+
+                  daElChips(
+                    r.dealtEl,
+                    r.dealtSum
+                  ) +
+
+                  '</div>' +
+
+                  '<div class="da-metric">' +
+
+                  '<div class="da-sum">' +
+                  daFmt(r.takenSum) +
+                  '</div>' +
+
+                  '<div class="da-dps">' +
+                  daFmt(r.takenMax) +
+                  ' BURST 1s' +
+                  '</div>' +
+
+                  '<div class="da-dps">' +
+                  daFmt(r.takenDps) +
+                  ' DPS' +
+                  '</div>' +
+
+                  daElChips(
+                    r.takenEl,
+                    r.takenSum
+                  ) +
+
+                  '</div>' +
+
+                  '</div>'
+              )
+              .join('') +
+
+            '</div>' +
+
+            '<div class="da-status">' +
+            status +
+            '</div>'
+          );
 
     root.innerHTML =
-      '<div class="da-panel ' + (daCollapsed ? 'collapsed' : '') + '">' +
-        '<header>' +
-          '<button type="button" class="da-toggle"><span class="da-title">Damage Analyzer</span></button>' +
-          '<button type="button" class="da-reset">Reset</button>' +
-        '</header>' +
-        '<div class="da-body">' + body + '</div>' +
+      '<div class="da-panel ' +
+      (
+        daCollapsed
+          ? 'collapsed'
+          : ''
+      ) +
+      '">' +
+
+      '<header>' +
+
+      '<button type="button" ' +
+      'class="da-toggle">' +
+
+      '<span class="da-title">' +
+      'Damage Analyzer' +
+      '</span>' +
+
+      '</button>' +
+
+      '<button type="button" ' +
+      'class="da-reset">' +
+      'Reset' +
+      '</button>' +
+
+      '</header>' +
+
+      '<div class="da-body">' +
+      body +
+      '</div>' +
+
       '</div>';
-    root.querySelector('.da-toggle')?.addEventListener('click', () => {
-      daCollapsed = !daCollapsed;
-      localStorage.setItem('cap-da-collapsed', daCollapsed ? '1' : '0');
-      daPaint();
-    });
-    root.querySelector('.da-reset')?.addEventListener('click', () => daReset());
+
+    root
+      .querySelector('.da-toggle')
+      ?.addEventListener(
+        'click',
+        () => {
+          daCollapsed =
+            !daCollapsed;
+
+          localStorage.setItem(
+            'cap-da-collapsed',
+            daCollapsed
+              ? '1'
+              : '0'
+          );
+
+          daPaint();
+        }
+      );
+
+    root
+      .querySelector('.da-reset')
+      ?.addEventListener(
+        'click',
+        () => daReset()
+      );
   }
 
   const DA_CSS =
-    ':host{display:block;width:100%;box-sizing:border-box;font-family:Verdana,system-ui,sans-serif;color:#ded3ca;}' +
-    '.da-panel{display:flex;flex-direction:column;gap:6px;padding:8px 10px;' +
-    'background:linear-gradient(180deg,rgba(28,36,39,.9),rgba(11,16,17,.96));' +
-    'border:1px solid rgba(120,90,40,.35);border-radius:6px;box-shadow:inset 0 0 6px rgba(0,0,0,.65);}' +
-    'header{display:flex;align-items:center;gap:8px;}' +
-    '.da-toggle{flex:1;border:0;background:transparent;color:#c8aa6e;cursor:pointer;font:inherit;text-align:left;padding:0;}' +
-    '.da-title{font-size:13px;font-weight:800;text-transform:uppercase;}' +
-    '.da-reset{border:0;background:transparent;color:#cdbe91;cursor:pointer;font-size:12px;font-weight:700;text-transform:uppercase;}' +
-    '.da-panel.collapsed .da-body{display:none;}' +
-    '.da-list{display:flex;flex-direction:column;gap:6px;}' +
-    '.da-head,.da-row{display:grid;grid-template-columns:minmax(56px,.85fr) 1fr 1fr;column-gap:6px;align-items:start;}' +
-    '.da-head{color:#a09b8c;font-size:11px;}' +
-    '.da-head span:not(:first-child){text-align:right;}' +
-    '.da-row+.da-row{padding-top:6px;border-top:1px solid rgba(120,90,40,.2);}' +
-    '.da-name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '.da-metric{display:flex;flex-direction:column;align-items:flex-end;gap:1px;text-align:right;}' +
-    '.da-sum{color:#c89b3c;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;}' +
-    '.da-dps{color:#5b5a56;font-size:10px;font-variant-numeric:tabular-nums;}' +
-    '.da-el{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px 5px;margin-top:1px;}' +
-    '.da-el.empty{color:#5b5a56;font-size:10px;}' +
-    '.da-chip{color:#a09b8c;font-size:10px;font-variant-numeric:tabular-nums;}' +
-    '.da-empty{text-align:center;color:#a09b8c;font-size:12px;padding:8px 0 2px;}' +
-    '.da-status{text-align:center;color:#6a6558;font-size:9px;padding-top:4px;word-break:break-all;}';
+    ':host{' +
+    'display:block;' +
+    'width:100%;' +
+    'box-sizing:border-box;' +
+    'font-family:Verdana,system-ui,sans-serif;' +
+    'color:#ded3ca;' +
+    '}' +
+
+    '.da-panel{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'gap:6px;' +
+    'padding:8px 10px;' +
+    'background:linear-gradient(' +
+    '180deg,' +
+    'rgba(28,36,39,.9),' +
+    'rgba(11,16,17,.96)' +
+    ');' +
+    'border:1px solid rgba(120,90,40,.35);' +
+    'border-radius:6px;' +
+    'box-shadow:inset 0 0 6px rgba(0,0,0,.65);' +
+    '}' +
+
+    'header{' +
+    'display:flex;' +
+    'align-items:center;' +
+    'gap:8px;' +
+    '}' +
+
+    '.da-toggle{' +
+    'flex:1;' +
+    'border:0;' +
+    'background:transparent;' +
+    'color:#c8aa6e;' +
+    'cursor:pointer;' +
+    'font:inherit;' +
+    'text-align:left;' +
+    'padding:0;' +
+    '}' +
+
+    '.da-title{' +
+    'font-size:13px;' +
+    'font-weight:800;' +
+    'text-transform:uppercase;' +
+    '}' +
+
+    '.da-reset{' +
+    'border:0;' +
+    'background:transparent;' +
+    'color:#cdbe91;' +
+    'cursor:pointer;' +
+    'font-size:12px;' +
+    'font-weight:700;' +
+    'text-transform:uppercase;' +
+    '}' +
+
+    '.da-panel.collapsed .da-body{' +
+    'display:none;' +
+    '}' +
+
+    '.da-list{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'gap:5px;' +
+    '}' +
+
+    '.da-head,.da-row{' +
+    'display:grid;' +
+    'grid-template-columns:' +
+    'minmax(56px,.85fr) 1fr 1fr;' +
+    'column-gap:6px;' +
+    'align-items:start;' +
+    '}' +
+
+    '.da-head{' +
+    'color:#a09b8c;' +
+    'font-size:11px;' +
+    '}' +
+
+    '.da-head span:not(:first-child){' +
+    'text-align:right;' +
+    '}' +
+
+    '.da-row+.da-row{' +
+    'padding-top:6px;' +
+    'border-top:1px solid rgba(120,90,40,.2);' +
+    '}' +
+
+    '.da-name{' +
+    'font-size:12px;' +
+    'font-weight:600;' +
+    'overflow:hidden;' +
+    'text-overflow:ellipsis;' +
+    'white-space:nowrap;' +
+    '}' +
+
+    '.da-metric{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'align-items:flex-end;' +
+    'gap:1px;' +
+    'text-align:right;' +
+    '}' +
+
+    '.da-sum{' +
+    'color:#c89b3c;' +
+    'font-size:12px;' +
+    'font-weight:600;' +
+    'font-variant-numeric:tabular-nums;' +
+    '}' +
+
+    '.da-dps{' +
+    'color:#5b5a56;' +
+    'font-size:10px;' +
+    'font-variant-numeric:tabular-nums;' +
+    '}' +
+
+    '.da-el{' +
+    'display:flex;' +
+    'flex-wrap:wrap;' +
+    'justify-content:flex-end;' +
+    'gap:2px 5px;' +
+    'margin-top:1px;' +
+    '}' +
+
+    '.da-chip{' +
+    'color:#a09b8c;' +
+    'font-size:10px;' +
+    'font-variant-numeric:tabular-nums;' +
+    '}' +
+
+    '.da-el.empty{' +
+    'color:#5b5a56;' +
+    'font-size:10px;' +
+    '}' +
+
+    '.da-empty{' +
+    'text-align:center;' +
+    'color:#a09b8c;' +
+    'font-size:12px;' +
+    'padding:8px 0 2px;' +
+    '}' +
+
+    '.da-status{' +
+    'text-align:center;' +
+    'color:#6a6558;' +
+    'font-size:9px;' +
+    'padding-top:4px;' +
+    'word-break:break-all;' +
+    '}';
 
   function daMountPanel() {
-    if (document.getElementById(DA_HOST)) return;
-    const host = document.createElement('div');
+    if (
+      document.getElementById(
+        DA_HOST
+      )
+    ) {
+      return;
+    }
+
+    const host =
+      document.createElement('div');
+
     host.id = DA_HOST;
-    host.style.cssText = 'position:fixed;right:12px;bottom:12px;width:320px;max-width:42vw;z-index:99998;';
-    const shadow = host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style');
+
+    host.style.cssText =
+      'position:fixed;' +
+      'right:12px;' +
+      'bottom:12px;' +
+      'width:320px;' +
+      'max-width:42vw;' +
+      'z-index:99998;';
+
+    const shadow =
+      host.attachShadow({
+        mode: 'open',
+      });
+
+    const style =
+      document.createElement(
+        'style'
+      );
+
     style.textContent = DA_CSS;
+
     shadow.appendChild(style);
-    const root = document.createElement('div');
+
+    const root =
+      document.createElement('div');
+
     root.className = 'da-root';
+
     shadow.appendChild(root);
-    (document.body || document.documentElement).appendChild(host);
+
+    (
+      document.body ||
+      document.documentElement
+    ).appendChild(host);
+
     daPaint();
   }
 
   function daB64(b64) {
     const bin = atob(b64);
-    const u8 = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+
+    const u8 =
+      new Uint8Array(
+        bin.length
+      );
+
+    for (
+      let i = 0;
+      i < bin.length;
+      i++
+    ) {
+      u8[i] =
+        bin.charCodeAt(i);
+    }
+
     return u8;
   }
 
@@ -8365,237 +8899,753 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     this.b = buf;
     this.o = 0;
   }
-  DaReader.prototype.rem = function () { return this.b.length - this.o; };
-  DaReader.prototype.u8 = function () {
-    if (this.o >= this.b.length) throw new Error('eof');
-    return this.b[this.o++];
-  };
-  DaReader.prototype.i8 = function () {
-    const v = this.u8();
-    return v > 0x7f ? v - 0x100 : v;
-  };
-  DaReader.prototype.u16 = function () {
-    if (this.rem() < 2) throw new Error('eof16');
-    const v = this.b[this.o] | (this.b[this.o + 1] << 8);
-    this.o += 2;
-    return v;
-  };
-  DaReader.prototype.bytes = function (n) {
-    if (this.rem() < n) throw new Error('eofn');
-    const s = this.b.slice(this.o, this.o + n);
-    this.o += n;
-    return s;
-  };
-  DaReader.prototype.str = function () {
-    const n = this.u16();
-    if (n <= 0 || n > 256 || this.rem() < n) throw new Error('str');
-    return new TextDecoder().decode(this.bytes(n));
-  };
 
-  function daSchool(kind) { return (kind >> 8) & 0xff; }
+  DaReader.prototype.rem =
+    function () {
+      return (
+        this.b.length -
+        this.o
+      );
+    };
 
-  function daTakenOk(category, kind, amount) {
-    if (!(amount > 0)) return false;
-    const isRestore = (kind & 0x88) !== 0;
-    if (isRestore) return false;
-    const school = daSchool(kind);
-    if (school === 5 || school === 7) return false; // mana / capacity
-    return category === 0 || category === 4 || (category >= 0 && category <= 7);
+  DaReader.prototype.u8 =
+    function () {
+      if (
+        this.o >=
+        this.b.length
+      ) {
+        throw new Error(
+          'eof'
+        );
+      }
+
+      return this.b[
+        this.o++
+      ];
+    };
+
+  DaReader.prototype.i8 =
+    function () {
+      const v =
+        this.u8();
+
+      return v > 0x7f
+        ? v - 0x100
+        : v;
+    };
+
+  DaReader.prototype.u16 =
+    function () {
+      if (
+        this.rem() < 2
+      ) {
+        throw new Error(
+          'eof16'
+        );
+      }
+
+      const v =
+        this.b[this.o] |
+        (
+          this.b[
+            this.o + 1
+          ] << 8
+        );
+
+      this.o += 2;
+
+      return v;
+    };
+
+  DaReader.prototype.bytes =
+    function (n) {
+      if (
+        this.rem() < n
+      ) {
+        throw new Error(
+          'eofn'
+        );
+      }
+
+      const s =
+        this.b.slice(
+          this.o,
+          this.o + n
+        );
+
+      this.o += n;
+
+      return s;
+    };
+
+  DaReader.prototype.str =
+    function () {
+      const n =
+        this.u16();
+
+      if (
+        n <= 0 ||
+        n > 256 ||
+        this.rem() < n
+      ) {
+        throw new Error(
+          'str'
+        );
+      }
+
+      return new TextDecoder()
+        .decode(
+          this.bytes(n)
+        );
+    };
+
+  function daSchool(kind) {
+    return (
+      (kind >> 8) &
+      0xff
+    );
+  }
+
+  function daTakenOk(
+    category,
+    kind,
+    amount
+  ) {
+    if (!(amount > 0)) {
+      return false;
+    }
+
+    const isRestore =
+      (kind & 0x88) !== 0;
+
+    if (isRestore) {
+      return false;
+    }
+
+    const school =
+      daSchool(kind);
+
+    if (
+      school === 5 ||
+      school === 7
+    ) {
+      return false;
+    }
+
+    return (
+      category === 0 ||
+      category === 4 ||
+      (
+        category >= 0 &&
+        category <= 7
+      )
+    );
   }
 
   function daParseCombatFloat(r) {
     const hits = [];
-    const count = r.u16();
-    if (count > 512) return hits;
-    for (let i = 0; i < count && r.rem() >= 8; i++) {
-      const category = r.u8();
-      const kind = r.u16();
-      const amount = r.u16();
-      r.i8(); r.i8();
-      const runtimePlayerId = r.u8();
-      if (daTakenOk(category, kind, amount)) {
-        hits.push({ runtimePlayerId, amount, element: daSchool(kind), asTaken: true });
+
+    const count =
+      r.u16();
+
+    if (count > 512) {
+      return hits;
+    }
+
+    for (
+      let i = 0;
+      i < count &&
+      r.rem() >= 8;
+      i++
+    ) {
+      const category =
+        r.u8();
+
+      const kind =
+        r.u16();
+
+      const amount =
+        r.u16();
+
+      r.i8();
+      r.i8();
+
+      const runtimePlayerId =
+        r.u8();
+
+      if (
+        daTakenOk(
+          category,
+          kind,
+          amount
+        )
+      ) {
+        hits.push({
+          runtimePlayerId,
+          amount,
+          element:
+            daSchool(kind),
+          asTaken: true,
+        });
       }
     }
+
     return hits;
   }
 
   function daParseAutoAttack(r) {
     const out = [];
     const start = r.o;
+
     try {
-      const stringCount = r.u8();
-      if (stringCount > 64) { r.o = start; return out; }
-      for (let i = 0; i < stringCount; i++) r.str();
-      if (r.rem() < 2) return out;
-      const recordCount = r.u16();
-      if (recordCount > 512) return out;
-      for (let i = 0; i < recordCount && r.rem() > 0; i++) {
-        const tag = r.u8();
-        if (tag <= 0x07) {
-          if (r.rem() < 7) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          const runtimePlayerId = r.u8();
-          if (daTakenOk(tag & 0x7f, kind, amount)) {
-            out.push({ runtimePlayerId, amount, element: daSchool(kind), asTaken: true });
+      const stringCount =
+        r.u8();
+
+      if (
+        stringCount > 64
+      ) {
+        r.o = start;
+        return out;
+      }
+
+      const strings = [];
+
+      for (
+        let i = 0;
+        i < stringCount;
+        i++
+      ) {
+        strings.push(
+          r.str()
+        );
+      }
+
+      daState.lastSpellStrings =
+        strings.slice(0, 16);
+
+      if (
+        r.rem() < 2
+      ) {
+        return out;
+      }
+
+      const recordCount =
+        r.u16();
+
+      if (
+        recordCount > 512
+      ) {
+        return out;
+      }
+
+      for (
+        let i = 0;
+        i < recordCount &&
+        r.rem() > 0;
+        i++
+      ) {
+        const tag =
+          r.u8();
+
+        if (
+          tag <= 0x07
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            break;
           }
-        } else if (tag === 0xf8 || tag === 0x78) {
-          if (r.rem() < 11) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          r.u16(); r.u16();
-          const attacker = r.u8();
-          const refCount = r.u8();
-          if (refCount < 1 || refCount > 6) break;
-          for (let j = 0; j < refCount + 1 && r.rem() > 0; j++) r.u8();
-          if (amount > 0) {
-            out.push({ runtimePlayerId: attacker || 0, amount, element: daSchool(kind), asDealt: true });
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            daTakenOk(
+              tag,
+              kind,
+              amount
+            )
+          ) {
+            out.push({
+              runtimePlayerId,
+              amount,
+              element:
+                daSchool(kind),
+              asTaken: true,
+            });
           }
-        } else if (tag >= 0x80 && tag <= 0x87) {
-          // às vezes 0x19 carrega tags de spell_cast
-          if (r.rem() < 7) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          const runtimePlayerId = r.u8();
-          if (daTakenOk(tag & 0x7f, kind, amount)) {
-            out.push({ runtimePlayerId, amount, element: daSchool(kind), asTaken: true });
+        } else if (
+          tag === 0xf8 ||
+          tag === 0x78
+        ) {
+          if (
+            r.rem() < 11
+          ) {
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          r.u16();
+          r.u16();
+
+          const attacker =
+            r.u8();
+
+          const refCount =
+            r.u8();
+
+          if (
+            refCount < 1 ||
+            refCount > 6
+          ) {
+            break;
+          }
+
+          for (
+            let j = 0;
+            j < refCount + 1 &&
+            r.rem() > 0;
+            j++
+          ) {
+            r.u8();
+          }
+
+          if (
+            amount > 0
+          ) {
+            out.push({
+              runtimePlayerId:
+                attacker || 0,
+              amount,
+              element:
+                daSchool(kind),
+              asDealt: true,
+            });
+          }
+        } else if (
+          tag >= 0x80 &&
+          tag <= 0x87
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            daTakenOk(
+              tag & 0x7f,
+              kind,
+              amount
+            )
+          ) {
+            out.push({
+              runtimePlayerId,
+              amount,
+              element:
+                daSchool(kind),
+              asTaken: true,
+            });
           }
         } else {
           break;
         }
       }
     } catch (e) {
-      daState.lastErr = String(e.message || e).slice(0, 40);
+      daState.lastErr =
+        String(
+          e && e.message
+            ? e.message
+            : e
+        ).slice(0, 60);
     }
+
     return out;
   }
 
   function daParseSpellCast(r) {
     const out = [];
+
     try {
-      const stringCount = r.u8();
-      if (stringCount > 64) return out;
-      for (let i = 0; i < stringCount; i++) r.str();
-      const actorCount = r.u8();
-      if (actorCount > 32) return out;
-      const actors = [];
-      for (let i = 0; i < actorCount; i++) {
-        const tag = r.u8();
-        const runtimePlayerId = r.u8();
+      const stringCount =
         r.u8();
-        r.u8();
-        if (tag === 0x1f && r.rem() > 0) r.u8();
-        actors.push(runtimePlayerId);
+
+      if (
+        stringCount > 64
+      ) {
+        return out;
       }
-      if (r.rem() < 2) return out;
-      const recordCount = r.u16();
-      if (recordCount > 512) return out;
-      for (let i = 0; i < recordCount && r.rem() > 0; i++) {
-        const tag = r.u8();
-        if (tag >= 0x80 && tag <= 0x87) {
-          if (r.rem() < 7) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          const runtimePlayerId = r.u8();
-          if (daTakenOk(tag & 0x7f, kind, amount)) {
-            out.push({ runtimePlayerId, amount, element: daSchool(kind), asTaken: true });
+
+      const strings = [];
+
+      for (
+        let i = 0;
+        i < stringCount;
+        i++
+      ) {
+        strings.push(
+          r.str()
+        );
+      }
+
+      // Guarda strings para investigação futura
+      // de nomes de skills/spells.
+      daState.lastSpellStrings =
+        strings.slice(0, 16);
+
+      const actorCount =
+        r.u8();
+
+      if (
+        actorCount > 32
+      ) {
+        return out;
+      }
+
+      const actors = [];
+
+      for (
+        let i = 0;
+        i < actorCount;
+        i++
+      ) {
+        const tag =
+          r.u8();
+
+        const runtimePlayerId =
+          r.u8();
+
+        r.u8();
+        r.u8();
+
+        if (
+          tag === 0x1f &&
+          r.rem() > 0
+        ) {
+          r.u8();
+        }
+
+        actors.push(
+          runtimePlayerId
+        );
+      }
+
+      if (
+        r.rem() < 2
+      ) {
+        return out;
+      }
+
+      const recordCount =
+        r.u16();
+
+      if (
+        recordCount > 512
+      ) {
+        return out;
+      }
+
+      for (
+        let i = 0;
+        i < recordCount &&
+        r.rem() > 0;
+        i++
+      ) {
+        const tag =
+          r.u8();
+
+        if (
+          tag >= 0x80 &&
+          tag <= 0x87
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            break;
           }
-        } else if (tag === 0xf8 || tag === 0x78) {
-          if (r.rem() < 11) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          r.u16(); r.u16();
-          const actorIndex = r.u8();
-          if (r.rem() > 0) r.u8();
-          const attacker = actors[actorIndex] != null ? actors[actorIndex] : 0;
-          if (amount > 0) {
-            out.push({ runtimePlayerId: attacker, amount, element: daSchool(kind), asDealt: true });
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            daTakenOk(
+              tag & 0x7f,
+              kind,
+              amount
+            )
+          ) {
+            out.push({
+              runtimePlayerId,
+              amount,
+              element:
+                daSchool(kind),
+              asTaken: true,
+            });
           }
-        } else if (tag <= 0x07) {
-          if (r.rem() < 7) break;
-          const kind = r.u16();
-          const amount = r.u16();
-          r.i8(); r.i8();
-          const runtimePlayerId = r.u8();
-          if (daTakenOk(tag, kind, amount)) {
-            out.push({ runtimePlayerId, amount, element: daSchool(kind), asTaken: true });
+        } else if (
+          tag === 0xf8 ||
+          tag === 0x78
+        ) {
+          if (
+            r.rem() < 11
+          ) {
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          r.u16();
+          r.u16();
+
+          const actorIndex =
+            r.u8();
+
+          if (
+            r.rem() > 0
+          ) {
+            r.u8();
+          }
+
+          const attacker =
+            actors[
+              actorIndex
+            ] != null
+              ? actors[
+                  actorIndex
+                ]
+              : 0;
+
+          if (
+            amount > 0
+          ) {
+            out.push({
+              runtimePlayerId:
+                attacker,
+              amount,
+              element:
+                daSchool(kind),
+              asDealt: true,
+            });
+          }
+        } else if (
+          tag <= 0x07
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            daTakenOk(
+              tag,
+              kind,
+              amount
+            )
+          ) {
+            out.push({
+              runtimePlayerId,
+              amount,
+              element:
+                daSchool(kind),
+              asTaken: true,
+            });
           }
         } else {
           break;
         }
       }
     } catch (e) {
-      daState.lastErr = String(e.message || e).slice(0, 40);
+      daState.lastErr =
+        String(
+          e && e.message
+            ? e.message
+            : e
+        ).slice(0, 60);
     }
+
     return out;
   }
 
-  // Fallback: varre o buffer atrás de padrões de hit (amount u16 razoável)
-  function daHeuristicHits(buf) {
-    const out = [];
-    // Procura tags de monstro 0xf8 / 0x78 seguidos de kind+amount
-    for (let i = 4; i < buf.length - 12; i++) {
-      const tag = buf[i];
-      if (tag !== 0xf8 && tag !== 0x78) continue;
-      const kind = buf[i + 1] | (buf[i + 2] << 8);
-      const amount = buf[i + 3] | (buf[i + 4] << 8);
-      if (amount < 1 || amount > 500000) continue;
-      // attacker costuma estar ~11 bytes depois do tag no layout curto
-      const attacker = buf[i + 11] || 0;
-      out.push({ runtimePlayerId: attacker, amount, element: daSchool(kind), asDealt: true });
-      if (out.length >= 40) break;
-    }
-    return out;
-  }
-
-  function daHandleCombatFrame(opcode, b64) {
+  function daHandleCombatFrame(
+    opcode,
+    b64
+  ) {
     try {
-      const buf = daB64(typeof b64 === 'string' ? b64 : String(b64));
+      const buf =
+        daB64(
+          typeof b64 === 'string'
+            ? b64
+            : String(b64)
+        );
+
       daState.frames++;
-      daState.lastLen = buf.length;
-      if (buf.length < 4 || buf[0] !== 0x53 || buf[1] !== 0x47) {
-        daState.lastErr = 'not-SG';
+      daState.lastLen =
+        buf.length;
+
+      if (
+        buf.length < 4 ||
+        buf[0] !== 0x53 ||
+        buf[1] !== 0x47
+      ) {
+        daState.invalidFrames++;
+        daState.lastErr =
+          'not-SG';
+
         daSchedulePaint();
         return;
       }
-      const op = buf[3];
-      daState.lastOp = op;
-      const r = new DaReader(buf);
+
+      const op =
+        buf[3];
+
+      daState.lastOp =
+        op;
+
+      const r =
+        new DaReader(buf);
+
       r.o = 4;
 
       let hits = [];
-      if (op === 0x1c) {
-        hits = daParseSpellCast(r);
-      } else if (op === 0x19 || op === 0x12) {
-        if (op === 0x19 && r.rem() > 0 && r.b[r.o] === 0) {
+
+      if (
+        op === 0x1c
+      ) {
+        hits =
+          daParseSpellCast(r);
+      } else if (
+        op === 0x19 ||
+        op === 0x12
+      ) {
+        if (
+          op === 0x19 &&
+          r.rem() > 0 &&
+          r.b[r.o] === 0
+        ) {
           r.u8();
-          hits = daParseCombatFloat(r);
+
+          hits =
+            daParseCombatFloat(r);
         } else {
-          hits = daParseAutoAttack(r);
+          hits =
+            daParseAutoAttack(r);
         }
+      } else {
+        daState.invalidFrames++;
+        daState.lastErr =
+          'opcode não suportado';
+
+        daSchedulePaint();
+        return;
       }
 
-      if (!hits.length) {
-        hits = daHeuristicHits(buf);
-        if (hits.length) daState.lastErr = null;
-        else if (!daState.lastErr) daState.lastErr = '0 hits';
-      } else {
+      if (hits.length) {
+        daState.parsedFrames++;
         daState.lastErr = null;
+
+        daRecord(
+          hits,
+          'confirmed'
+        );
+      } else {
+        daState.invalidFrames++;
+
+        daState.lastErr =
+          'frame sem hit confirmado';
+
+        daSchedulePaint();
       }
 
       if (daDebug) {
-        console.log('[DA]', { op: '0x' + op.toString(16), len: buf.length, hits: hits.length, sample: hits.slice(0, 3) });
+        console.log(
+          '[DA]',
+          {
+            op:
+              '0x' +
+              op.toString(16),
+
+            len:
+              buf.length,
+
+            hits:
+              hits.length,
+
+            strings:
+              daState.lastSpellStrings,
+
+            sample:
+              hits.slice(0, 5),
+          }
+        );
       }
-      if (hits.length) daRecord(hits);
-      else daSchedulePaint();
     } catch (e) {
-      daState.lastErr = String(e.message || e).slice(0, 40);
+      daState.invalidFrames++;
+
+      daState.lastErr =
+        String(
+          e && e.message
+            ? e.message
+            : e
+        ).slice(0, 60);
+
       daSchedulePaint();
     }
   }
@@ -8603,110 +9653,390 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   function daPersistNames() {
     try {
       const obj = {};
-      for (const [k, v] of daState.names) obj[k] = v;
-      sessionStorage.setItem('cap-da-names', JSON.stringify(obj));
-      sessionStorage.setItem('cap-da-party', JSON.stringify([...daState.partyIds]));
+
+      for (
+        const [k, v]
+        of daState.names
+      ) {
+        obj[k] = v;
+      }
+
+      sessionStorage.setItem(
+        'cap-da-names',
+        JSON.stringify(obj)
+      );
+
+      sessionStorage.setItem(
+        'cap-da-party',
+        JSON.stringify([
+          ...daState.partyIds,
+        ])
+      );
     } catch (_) {}
   }
 
   function daLoadNames() {
     try {
-      const n = JSON.parse(sessionStorage.getItem('cap-da-names') || '{}');
-      for (const k of Object.keys(n)) {
+      const n =
+        JSON.parse(
+          sessionStorage.getItem(
+            'cap-da-names'
+          ) || '{}'
+        );
+
+      for (
+        const k
+        of Object.keys(n)
+      ) {
         const id = +k;
-        if (daIdOk(id) && n[k]) daState.names.set(id, String(n[k]));
+
+        if (
+          daIdOk(id) &&
+          n[k]
+        ) {
+          daState.names.set(
+            id,
+            String(n[k])
+          );
+        }
       }
-      const p = JSON.parse(sessionStorage.getItem('cap-da-party') || '[]');
-      for (const id of p) if (daIdOk(+id)) daState.partyIds.add(+id);
+
+      const p =
+        JSON.parse(
+          sessionStorage.getItem(
+            'cap-da-party'
+          ) || '[]'
+        );
+
+      for (
+        const id
+        of p
+      ) {
+        if (
+          daIdOk(+id)
+        ) {
+          daState.partyIds.add(
+            +id
+          );
+        }
+      }
     } catch (_) {}
   }
 
-  function daWalkPlayers(node, depth) {
-    if (!node || depth > 8) return;
-    if (Array.isArray(node)) {
-      for (const x of node) daWalkPlayers(x, depth + 1);
+  function daWalkPlayers(
+    node,
+    depth
+  ) {
+    if (
+      !node ||
+      depth > 8
+    ) {
       return;
     }
-    if (typeof node !== 'object') return;
-    const id = node.runtimePlayerId ?? node.runtime_player_id;
-    const name = node.name || node.nickname || node.characterName || node.displayName;
-    if (typeof id === 'number' && daIdOk(id) && typeof name === 'string') {
-      const nm = name.trim();
-      if (nm.length >= 2 && nm.length < 32 && !/^player\s*#/i.test(nm)) {
-        daState.names.set(id, nm);
-        daState.partyIds.add(id);
+
+    if (
+      Array.isArray(node)
+    ) {
+      for (
+        const x
+        of node
+      ) {
+        daWalkPlayers(
+          x,
+          depth + 1
+        );
+      }
+
+      return;
+    }
+
+    if (
+      typeof node !== 'object'
+    ) {
+      return;
+    }
+
+    const id =
+      node.runtimePlayerId ??
+      node.runtime_player_id;
+
+    const name =
+      node.name ||
+      node.nickname ||
+      node.characterName ||
+      node.displayName;
+
+    if (
+      typeof id === 'number' &&
+      daIdOk(id) &&
+      typeof name === 'string'
+    ) {
+      const nm =
+        name.trim();
+
+      if (
+        nm.length >= 2 &&
+        nm.length < 32 &&
+        !/^player\s*#/i.test(nm)
+      ) {
+        daState.names.set(
+          id,
+          nm
+        );
+
+        daState.partyIds.add(
+          id
+        );
       }
     }
-    for (const k of Object.keys(node)) {
+
+    for (
+      const k
+      of Object.keys(node)
+    ) {
       const v = node[k];
-      if (v && typeof v === 'object') daWalkPlayers(v, depth + 1);
+
+      if (
+        v &&
+        typeof v === 'object'
+      ) {
+        daWalkPlayers(
+          v,
+          depth + 1
+        );
+      }
     }
   }
 
-  function daRememberNamesFromRx(text) {
+  function daRememberNamesFromRx(
+    text
+  ) {
     try {
-      const msg = typeof text === 'string' ? JSON.parse(text) : text;
-      if (!msg || typeof msg !== 'object') return;
-      daWalkPlayers(msg, 0);
-      if (daState.names.size) daPersistNames();
+      const msg =
+        typeof text === 'string'
+          ? JSON.parse(text)
+          : text;
+
+      if (
+        !msg ||
+        typeof msg !== 'object'
+      ) {
+        return;
+      }
+
+      daWalkPlayers(
+        msg,
+        0
+      );
+
+      if (
+        daState.names.size
+      ) {
+        daPersistNames();
+      }
+
       daSchedulePaint();
     } catch (_) {}
   }
 
-  let daBridgeInfo = { bv: '?', socket: null, sg: 0 };
+  let daBridgeInfo = {
+    bv: '?',
+    socket: null,
+    sg: 0,
+  };
 
   function initDamageAnalyzer() {
     daLoadNames();
     daMountPanel();
-    try { window.postMessage({ __capCombate: true, on: true }, '*'); } catch (_) {}
-    try { window.postMessage({ __capPing: true }, '*'); } catch (_) {}
 
-    window.addEventListener('message', (ev) => {
-      if (ev.source !== window || !ev.data || !ev.data.__cap) return;
-      const tipo = ev.data.tipo;
-      const dado = ev.data.dado;
-      if ((tipo === 'combate' || tipo === 'sg') && dado) {
-        const opcode = dado.opcode;
-        const b64 = (dado && dado.b64) != null ? dado.b64 : (typeof dado === 'string' ? dado : null);
-        // combate: sempre tenta parse; sg: só opcodes de combate
-        const combatOps = { 0x12:1, 0x19:1, 0x1a:1, 0x1b:1, 0x1c:1, 0x1d:1, 0x1e:1 };
-        if (typeof b64 === 'string') {
-          if (tipo === 'combate' || combatOps[opcode]) {
-            daHandleCombatFrame(opcode, b64);
-          } else {
-            daState.frames++; // conta SG não-combat para diagnóstico
-            daState.lastOp = opcode;
-            daState.lastLen = dado.len || 0;
-            daSchedulePaint();
+    try {
+      window.postMessage(
+        {
+          __capCombate: true,
+          on: true,
+        },
+        '*'
+      );
+    } catch (_) {}
+
+    try {
+      window.postMessage(
+        {
+          __capPing: true,
+        },
+        '*'
+      );
+    } catch (_) {}
+
+    window.addEventListener(
+      'message',
+      (ev) => {
+        if (
+          ev.source !== window ||
+          !ev.data ||
+          !ev.data.__cap
+        ) {
+          return;
+        }
+
+        const tipo =
+          ev.data.tipo;
+
+        const dado =
+          ev.data.dado;
+
+        if (
+          (tipo === 'combate' ||
+            tipo === 'sg') &&
+          dado
+        ) {
+          const opcode =
+            dado.opcode;
+
+          const b64 =
+            dado &&
+            dado.b64 != null
+              ? dado.b64
+              : (
+                  typeof dado ===
+                  'string'
+                    ? dado
+                    : null
+                );
+
+          const combatOps = {
+            0x12: 1,
+            0x19: 1,
+            0x1a: 1,
+            0x1b: 1,
+            0x1c: 1,
+            0x1d: 1,
+            0x1e: 1,
+          };
+
+          if (
+            typeof b64 === 'string'
+          ) {
+            if (
+              tipo === 'combate' ||
+              combatOps[opcode]
+            ) {
+              daHandleCombatFrame(
+                opcode,
+                b64
+              );
+            } else {
+              daState.frames++;
+              daState.lastOp =
+                opcode;
+              daState.lastLen =
+                dado.len || 0;
+
+              daSchedulePaint();
+            }
           }
+        } else if (
+          tipo === 'rx' &&
+          typeof dado === 'string'
+        ) {
+          daRememberNamesFromRx(
+            dado
+          );
+        } else if (
+          tipo === 'bridge'
+        ) {
+          if (
+            dado &&
+            typeof dado === 'object'
+          ) {
+            daBridgeInfo.bv =
+              dado.bv ||
+              daBridgeInfo.bv;
+
+            if (
+              dado.socket != null
+            ) {
+              daBridgeInfo.socket =
+                dado.socket;
+            }
+
+            if (
+              dado.stats
+            ) {
+              daBridgeInfo.sg =
+                dado.stats.sg ||
+                0;
+            }
+          } else if (
+            typeof dado === 'string'
+          ) {
+            daBridgeInfo.bv =
+              dado;
+          }
+
+          daSchedulePaint();
+        } else if (
+          tipo === 'status'
+        ) {
+          if (
+            dado &&
+            typeof dado === 'object' &&
+            'conectado' in dado
+          ) {
+            daBridgeInfo.socket =
+              !!dado.conectado;
+
+            if (
+              dado.bv
+            ) {
+              daBridgeInfo.bv =
+                dado.bv;
+            }
+          }
+
+          daSchedulePaint();
         }
-      } else if (tipo === 'rx' && typeof dado === 'string') {
-        daRememberNamesFromRx(dado);
-      } else if (tipo === 'bridge') {
-        if (dado && typeof dado === 'object') {
-          daBridgeInfo.bv = dado.bv || daBridgeInfo.bv;
-          if (dado.socket != null) daBridgeInfo.socket = dado.socket;
-          if (dado.stats) daBridgeInfo.sg = dado.stats.sg || 0;
-        } else if (typeof dado === 'string') {
-          daBridgeInfo.bv = dado;
-        }
-        daSchedulePaint();
-      } else if (tipo === 'status') {
-        if (dado && typeof dado === 'object' && 'conectado' in dado) {
-          daBridgeInfo.socket = !!dado.conectado;
-          if (dado.bv) daBridgeInfo.bv = dado.bv;
-        }
-        daSchedulePaint();
       }
-    });
+    );
 
-    setInterval(() => {
-      if (!document.getElementById(DA_HOST) && document.body) daMountPanel();
-      try { window.postMessage({ __capCombate: true, on: true }, '*'); } catch (_) {}
-      try { window.postMessage({ __capPing: true }, '*'); } catch (_) {}
-    }, 3000);
+    setInterval(
+      () => {
+        if (
+          !document.getElementById(
+            DA_HOST
+          ) &&
+          document.body
+        ) {
+          daMountPanel();
+        }
 
-    log('Damage Analyzer ativo (v' + VERSION + ') — entre na hunt e ataque');
+        try {
+          window.postMessage(
+            {
+              __capCombate: true,
+              on: true,
+            },
+            '*'
+          );
+        } catch (_) {}
+
+        try {
+          window.postMessage(
+            {
+              __capPing: true,
+            },
+            '*'
+          );
+        } catch (_) {}
+      },
+      3000
+    );
+
+    log(
+      'Damage Analyzer ativo (v' +
+      VERSION +
+      ') — entre na hunt e ataque'
+    );
   }
 
 
