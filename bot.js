@@ -6536,6 +6536,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return Number.isFinite(n) ? n : null;
   }
 
+  // The Market limits each purchase to the stock of the selected listing.
+  function readBuyListingAvailable(modal) {
+    modal = modal || buyListingModal();
+    if (!modal) return null;
+    const m = (modal.textContent || '').replace(/\s+/g, ' ').match(/([\d.]+)\s*x\s*available/i);
+    if (!m) return null;
+    const n = parseInt(m[1].replace(/\D/g, ''), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
   // Define quantidade: 1) digita no input  2) se falhar, clica no "+" N vezes
   async function setBuyQuantity(qty) {
     qty = Math.max(1, parseInt(qty, 10) || 1);
@@ -6726,9 +6736,17 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     await sleep(400);
 
     // 3) Define quantidade (input e/ou botão +)
-    const qtyOk = await setBuyQuantity(qty);
+    const available = readBuyListingAvailable();
+    const targetQty = available === null ? qty : Math.min(qty, available);
+    if (available !== null && available < qty) {
+      log(`Imbui-buy: oferta atual tem apenas ${available}x; faltarao ${qty - available}x`);
+    }
+    if (!targetQty) return { ok: false, name, qty, unit, error: 'oferta sem estoque', bought: 0 };
+    const qtyOk = await setBuyQuantity(targetQty);
     const gotQty = readBuyListingQty();
-    log(`Imbui-buy: quantidade no modal = ${gotQty} (alvo ${qty}) ${qtyOk ? '✔' : '⚠'}`);
+    const bought = Math.max(0, Math.min(targetQty, parseInt(gotQty, 10) || 0));
+    log(`Imbui-buy: quantidade no modal = ${gotQty} (alvo ${targetQty}) ${qtyOk ? '✔' : '⚠'}`);
+    if (!bought) return { ok: false, name, qty, unit, error: 'quantidade invalida no modal', bought: 0 };
     await sleep(350);
 
     // 4) Confirma BUY no modal
@@ -6761,8 +6779,40 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       await sleep(300);
       return { ok: false, name, qty, unit, error: 'modal não fechou' };
     }
-    log(`Imbui-buy: ✔ compra confirmada — ${qty}× "${name}" @ ${fmtGold(unit)}`);
-    return { ok: true, name, qty, unit, subtotal: unit * qty };
+    log(`Imbui-buy: ✔ compra confirmada — ${bought}× "${name}" @ ${fmtGold(unit)}`);
+    return { ok: true, name, qty, bought, unit, subtotal: unit * bought };
+  }
+
+  // A material may span multiple listings. Reopen the item after every
+  // successful listing purchase until the requested total is complete.
+  async function buyMarketItemTotal(name, qty) {
+    const requested = Math.max(1, parseInt(qty, 10) || 1);
+    let remaining = requested;
+    let spent = 0;
+    let lastUnit = null;
+    let attempts = 0;
+    const purchases = [];
+    while (remaining > 0 && attempts++ < 25) {
+      const r = await buyMarketItem(name, remaining);
+      if (!r.ok || !(r.bought > 0)) {
+        return { ok: false, name, qty: requested, bought: requested - remaining, remaining,
+          subtotal: spent, unit: lastUnit, purchases, error: r.error || 'compra incompleta' };
+      }
+      purchases.push(r);
+      remaining -= r.bought;
+      spent += r.subtotal || 0;
+      lastUnit = r.unit;
+      if (remaining > 0) {
+        log(`Imbui-buy: ${r.bought}x compradas; procurando outra oferta para ${remaining}x de "${name}"...`);
+        await sleep(700);
+      }
+    }
+    if (remaining > 0) {
+      return { ok: false, name, qty: requested, bought: requested - remaining, remaining,
+        subtotal: spent, unit: lastUnit, purchases, error: 'limite de tentativas ao procurar oferta' };
+    }
+    return { ok: true, name, qty: requested, bought: requested, remaining: 0,
+      subtotal: spent, unit: lastUnit, purchases };
   }
 
   // Cota todos os materiais sem comprar.
@@ -6869,7 +6919,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       // 2) Compra item a item
       const results = [];
       for (const it of quote.items) {
-        const r = await buyMarketItem(it.name, it.qty);
+        const r = await buyMarketItemTotal(it.name, it.qty);
         results.push(r);
         await sleep(600);
       }
@@ -6881,8 +6931,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (ui && ui.imbueResult) {
         ui.imbueResult.textContent =
           results.map((r) => r.ok
-            ? `✔ ${r.qty}× ${r.name} @ ${fmtGold(r.unit)}`
-            : `✖ ${r.name}: ${r.error || 'falhou'}`
+            ? `✔ ${r.bought || r.qty}× ${r.name} (total completo)`
+            : `✖ ${r.name}: ${r.error || 'falhou'}${r.bought ? ` (${r.bought}/${r.qty} compradas; faltam ${r.remaining})` : ''}`
           ).join('\n') + `\n\nGasto estimado: ${fmtGold(spent)}`;
       }
       return { ok: okN === results.length, results, spent, quote };
