@@ -2,7 +2,8 @@
 const KEEP_AWAKE_ALARM = 'cap-offline-keepawake';
 const POKE_ALARM = 'cap-offline-poke';
 const UPDATE_ALARM = 'cap-offline-update-check';
-const UPDATE_CHECK_MINUTES = 5;
+// Chrome limita alarms publicados a no mínimo 30 segundos.
+const UPDATE_CHECK_MINUTES = 0.5;
 
 function createAlarms() {
   chrome.alarms.create(KEEP_AWAKE_ALARM, { periodInMinutes: 30 });
