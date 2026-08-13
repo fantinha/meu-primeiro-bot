@@ -4628,7 +4628,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (verEl) verEl.textContent = 'v' + runningVersion();
     } catch (_) {}
     checkForUpdate();
-    setInterval(checkForUpdate, 60 * 60 * 1000);
+    // Mantém o aviso de atualização ágil também para quem deixa o jogo aberto.
+    setInterval(checkForUpdate, 5 * 60 * 1000);
   }
 
   // Compara a versão do bot rodando com a publicada no servidor e mostra uma
