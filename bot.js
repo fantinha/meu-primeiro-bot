@@ -7444,7 +7444,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       clearInterval(boot);
       buildPanel();
       initTabLockChannel(); // canal da trava de aba (antes de um possível auto-resume)
-      try { initDamageAnalyzer(); } catch (e) { console.warn('[CAP] Damage Analyzer init', e); }
       log('Painel carregado. Configure e clique INICIAR.');
       // Se o bot estava rodando antes do reload (ex.: tela de inatividade),
       // retoma automaticamente — o tick já clica em Retomar se ela aparecer.
@@ -8192,6 +8191,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         hits: 0,
         damage: 0,
         lastAt: 0,
+        lastCastAt: null,
       };
 
       daState.skills.set(
@@ -9135,10 +9135,27 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     // Um frame 0x1c representa uma ocorrência
     // da ação observada.
-    skill.casts++;
-
-    skill.lastAt =
+    const now =
       daNow();
+
+    if (daState.startedAt == null) {
+      daState.startedAt = now;
+    }
+
+    daState.updatedAt = now;
+
+    const CAST_DEDUPE_MS = 500;
+
+    const isDuplicateCast =
+      skill.lastCastAt != null &&
+      now - skill.lastCastAt < CAST_DEDUPE_MS;
+
+    if (!isDuplicateCast) {
+      skill.casts++;
+      skill.lastCastAt = now;
+    }
+
+    skill.lastAt = now;
 
     for (
       const h
@@ -10247,7 +10264,15 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     socket: null,
   };
 
+  let daInitialized = false;
+
   function initDamageAnalyzer() {
+    if (daInitialized) {
+      return;
+    }
+
+    daInitialized = true;
+
     daMountPanel();
 
     try {
