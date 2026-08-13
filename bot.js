@@ -7707,13 +7707,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function metricsLineFor(huntName, mode) {
     const entry = getMetricsEntry(huntName, mode);
-    if (!entry || !entry.avg) return '';
-    const a = entry.avg;
+    if (!entry || !entry.runs || !entry.runs.length) return '';
+    const latest = entry.runs[0];
+    const avg = entry.avg || averageRuns(entry.runs);
+    const a = latest;
     const parts = [];
     if (a.xpH != null) parts.push(fmtRate(a.xpH) + ' XP/h');
     if (a.balanceH != null) parts.push(fmtRate(a.balanceH) + ' gold/h');
     if (a.durationSec != null) parts.push('~' + fmtDurShort(a.durationSec));
     if (!parts.length) return '';
+    let line = parts.join(' - ');
+    if (avg && avg.n > 1) {
+      const avgParts = [];
+      if (avg.xpH != null) avgParts.push(fmtRate(avg.xpH) + ' XP/h');
+      if (avg.balanceH != null) avgParts.push(fmtRate(avg.balanceH) + ' gold/h');
+      if (avgParts.length) line += ' | media ' + avg.n + ': ' + avgParts.join(' - ');
+    }
+    return line;
     return parts.join(' · ') + (a.n > 1 ? ' (média ' + a.n + ')' : '');
   }
 
