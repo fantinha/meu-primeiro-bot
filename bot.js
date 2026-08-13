@@ -8478,24 +8478,24 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     );
   }
 
-  function daProject() {
+    function daProject() {
     const hasParty =
       daState.partyIds &&
-      daState.partyIds.size >
-        0;
-
-    const hasNames =
-      daState.names &&
-      daState.names.size >
-        0;
+      daState.partyIds.size > 1;
 
     let rows = [
       ...daState.entities.values(),
     ].filter(
       (b) =>
-        daIdOk(b.id)
+        daIdOk(b.id) &&
+        (
+          b.dealtSum > 0 ||
+          b.takenSum > 0
+        )
     );
 
+    // Só filtra pela party quando realmente temos
+    // mais de um membro identificado.
     if (hasParty) {
       rows =
         rows.filter(
@@ -8504,46 +8504,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               b.id
             )
         );
-    } else if (hasNames) {
-      rows =
-        rows.filter(
-          (b) =>
-            daState.names.has(
-              b.id
-            )
-        );
-    } else {
-      rows =
-        rows
-          .filter(
-            (b) =>
-              b.id <= 32 &&
-              (
-                b.dealtSum > 0 ||
-                b.takenSum > 0
-              )
-          )
-          .sort(
-            (a, b) =>
-              (
-                b.dealtSum +
-                b.takenSum
-              ) -
-              (
-                a.dealtSum +
-                a.takenSum
-              )
-          )
-          .slice(
-            0,
-            8
-          );
     }
 
     return rows
       .map(
         (b) => ({
           id: b.id,
+
           name:
             daName(b.id),
 
@@ -8589,107 +8556,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           b.takenSum -
           a.takenSum
       );
-  }
-
-  function daReset() {
-    const names =
-      daState.names;
-
-    const partyIds =
-      daState.partyIds;
-
-    daState =
-      daCreateState();
-
-    daState.names =
-      names;
-
-    daState.partyIds =
-      partyIds;
-
-    daSchedulePaint();
-  }
-
-  function daSchedulePaint() {
-    if (daPaintQueued) {
-      return;
-    }
-
-    daPaintQueued =
-      true;
-
-    requestAnimationFrame(
-      () => {
-        daPaintQueued =
-          false;
-
-        daPaint();
-      }
-    );
-  }
-
-  function daMountPanel() {
-    if (
-      document.getElementById(
-        DA_HOST
-      )
-    ) {
-      return;
-    }
-
-    const host =
-      document.createElement(
-        'div'
-      );
-
-    host.id =
-      DA_HOST;
-
-    host.style.cssText =
-      'position:fixed;' +
-      'right:12px;' +
-      'bottom:12px;' +
-      'width:390px;' +
-      'max-width:50vw;' +
-      'z-index:99998;';
-
-    const shadow =
-      host.attachShadow({
-        mode: 'open',
-      });
-
-    const style =
-      document.createElement(
-        'style'
-      );
-
-    style.textContent =
-      DA_CSS;
-
-    shadow.appendChild(
-      style
-    );
-
-    const root =
-      document.createElement(
-        'div'
-      );
-
-    root.className =
-      'da-root';
-
-    shadow.appendChild(
-      root
-    );
-
-    (
-      document.body ||
-      document.documentElement
-    ).appendChild(
-      host
-    );
-
-    daPaint();
   }
     // =====================================================================
   // PARSER REAL DOS FRAMES SG
