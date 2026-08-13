@@ -8249,11 +8249,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     );
   }
 
-    function daIdOk(id) {
+  function daIdOk(id) {
     return (
-      Number.isInteger(id) &&
+      typeof id === 'number' &&
       id > 0 &&
-      id <= 0xffff
+      id < 200
     );
   }
 
@@ -8378,23 +8378,26 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function daDps(sum) {
     if (
-      !(sum > 0) ||
-      daState.startedAt == null ||
-      daState.updatedAt == null
+      !sum ||
+      daState.startedAt ==
+        null ||
+      daState.updatedAt ==
+        null
     ) {
       return 0;
     }
 
-    const elapsedMs =
+    const sec =
       Math.max(
-        daState.updatedAt -
-        daState.startedAt,
-        1
+        (
+          daState.updatedAt -
+          daState.startedAt
+        ) / 1000,
+        0.001
       );
 
     return (
-      sum /
-      (elapsedMs / 1000)
+      sum / sec
     );
   }
 
@@ -9111,7 +9114,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // REGISTRO DAS SKILLS
   // ---------------------------------------------------------------------
 
- function daRecordSkill(
+  function daRecordSkill(
     result
   ) {
     if (
@@ -9120,9 +9123,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     ) {
       return;
     }
-
-    const now =
-      daNow();
 
     const skill =
       daEnsureSkill(
@@ -9133,23 +9133,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       return;
     }
 
-    // O relógio começa no primeiro evento de combate,
-    // não no momento em que o painel foi criado.
-    if (
-      daState.startedAt ==
-      null
-    ) {
-      daState.startedAt =
-        now;
-    }
-
-    daState.updatedAt =
-      now;
-
+    // Um frame 0x1c representa uma ocorrência
+    // da ação observada.
     skill.casts++;
 
     skill.lastAt =
-      now;
+      daNow();
 
     for (
       const h
@@ -9162,7 +9151,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       }
 
       skill.hits++;
-
       skill.damage +=
         h.amount;
     }
@@ -9175,9 +9163,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // por personagem.
   // ---------------------------------------------------------------------
 
-    function daParseCombatFrame(
+  function daParseCombatFrame(
     buf
   ) {
+    const r =
+      new DaReader(buf);
+
     const result = {
       dealtHits: [],
       takenHits: [],
@@ -9185,159 +9176,194 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     try {
       if (
-        !buf ||
-        buf.length < 7
+        r.rem() < 4
       ) {
         return result;
       }
-
-      // ---------------------------------------------------------------
-      // Cabeçalho:
-      //
-      // 00-01 = "SG"
-      // 02    = versão
-      // 03    = opcode
-      // 04-05 = quantidade de registros (BE)
-      // 06    = flag/reservado
-      // ---------------------------------------------------------------
 
       if (
-        buf[0] !== 0x53 ||
-        buf[1] !== 0x47
+        r.u8() !== 0x53 ||
+        r.u8() !== 0x47
       ) {
         return result;
       }
 
-      const opcode =
-        buf[3];
+      r.u8();
+
+      const op =
+        r.u8();
 
       if (
-        opcode !== 0x19 &&
-        opcode !== 0x12
+        op !== 0x19 &&
+        op !== 0x12
       ) {
         return result;
       }
 
-      const count =
-        (
-          (buf[4] << 8) |
-          buf[5]
-        );
-
-      if (
-        count <= 0 ||
-        count > 1000
-      ) {
-        return result;
-      }
-
-      let offset = 7;
-
       // ---------------------------------------------------------------
-      // Cada registro observado nos frames reais tem 8 bytes:
-      //
-      // +0 = tipo
-      // +1/+2 = actor/runtime ID (u16 LE)
-      // +3/+4 = dano/quantidade (u16 LE)
-      // +5/+6/+7 = metadados
-      //
-      // Os frames capturados mostraram IDs como:
-      // 1412, 2052, 772 etc.
-      //
-      // Isso explica por que o parser anterior, que usava u8(),
-      // não conseguia identificar os personagens.
+      // 0x19 e 0x12 têm formatos diferentes dependendo
+      // do evento. O parser abaixo procura estruturas
+      // confirmadas sem usar fallback heurístico para
+      // criar dano inexistente.
       // ---------------------------------------------------------------
 
-      for (
-        let i = 0;
-        i < count;
-        i++
+      while (
+        r.rem() >= 8
       ) {
+        const start =
+          r.o;
+
+        const tag =
+          r.u8();
+
         if (
-          offset + 8 >
-          buf.length
+          tag >= 0x80 &&
+          tag <= 0x87
         ) {
-          break;
-        }
+          if (
+            r.rem() < 7
+          ) {
+            r.o =
+              start;
 
-        const type =
-          buf[offset];
+            break;
+          }
 
-        const runtimePlayerId =
-          (
-            buf[offset + 1] |
-            (
-              buf[offset + 2]
-              << 8
-            )
-          );
+          const kind =
+            r.u16();
 
-        const amount =
-          (
-            buf[offset + 3] |
-            (
-              buf[offset + 4]
-              << 8
-            )
-          );
+          const amount =
+            r.u16();
 
-        const meta1 =
-          buf[offset + 5];
+          r.i8();
+          r.i8();
 
-        const meta2 =
-          buf[offset + 6];
+          const runtimePlayerId =
+            r.u8();
 
-        const meta3 =
-          buf[offset + 7];
-
-        offset += 8;
-
-        if (
-          !(
+          if (
             amount > 0
-          )
-        ) {
+          ) {
+            result.takenHits.push({
+              runtimePlayerId,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
           continue;
         }
 
         if (
-          !daIdOk(
-            runtimePlayerId
-          )
+          tag === 0xf8 ||
+          tag === 0x78
         ) {
+          if (
+            r.rem() < 12
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          r.u16();
+          r.u16();
+
+          const attacker =
+            r.u8();
+
+          if (
+            r.rem() > 0
+          ) {
+            r.u8();
+          }
+
+          if (
+            amount > 0
+          ) {
+            result.dealtHits.push({
+              runtimePlayerId:
+                attacker || 0,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
           continue;
         }
 
-        // -------------------------------------------------------------
-        // Tipo 0 aparece nos frames reais associados
-        // aos eventos de dano.
-        //
-        // Tipos diferentes ficam fora do dano causado
-        // para não contaminar o DPS.
-        // -------------------------------------------------------------
-
+        // Formatos simples observados
+        // em eventos de combate.
         if (
-          type !== 0
+          tag <= 0x07
         ) {
+          if (
+            r.rem() < 7
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            amount > 0
+          ) {
+            result.takenHits.push({
+              runtimePlayerId,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
           continue;
         }
 
-        result.dealtHits.push({
-          runtimePlayerId,
-
-          amount,
-
-          // O primeiro byte de metadado permanece disponível
-          // para refinarmos a identificação do elemento depois.
-          element:
-            meta3,
-
-          type,
-
-          meta1,
-          meta2,
-          meta3,
-        });
+        r.o =
+          start + 1;
       }
 
     } catch (e) {
@@ -9427,7 +9453,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         );
       }
 
- 
+      if (
+        parsed.dealtHits.length ||
+        parsed.takenHits.length
+      ) {
+        daRecord(
+          [
+            ...parsed.dealtHits,
+            ...parsed.takenHits,
+          ],
+          '0x1c'
+        );
+      }
 
       if (
         parsed.skill
