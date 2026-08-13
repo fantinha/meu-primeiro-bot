@@ -8081,7 +8081,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   // =====================================================================
-  // DAMAGE ANALYZER (v1.3.1) — parser estruturado, sem heurística no DPS
+  // DAMAGE ANALYZER (v2.0.0) — parser real 0x1c + combate sem duplicação
   // =====================================================================
 
   const DA_HOST = 'cap-damage-analyzer';
@@ -8114,6 +8114,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       confirmedHits: 0,
       invalidFrames: 0,
 
+      ignoredSgFrames: 0,
+
+      skills: new Map(),
+
       lastOp: null,
       lastErr: null,
       lastLen: 0,
@@ -8125,11 +8129,15 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   let daState = daCreateState();
 
   let daPaintQueued = false;
-  let daCollapsed = localStorage.getItem('cap-da-collapsed') === '1';
-  let daDebug = localStorage.getItem('cap-da-debug') === '1';
+  let daCollapsed =
+    localStorage.getItem('cap-da-collapsed') === '1';
+
+  let daDebug =
+    localStorage.getItem('cap-da-debug') === '1';
 
   function daFmt(n) {
-    return Math.round(n || 0).toLocaleString('pt-BR');
+    return Math.round(n || 0)
+      .toLocaleString('pt-BR');
   }
 
   function daNow() {
@@ -8149,6 +8157,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         dealtMax: 0,
         takenMax: 0,
 
+        dealtHits: 0,
+        takenHits: 0,
+
         dealtWin: [],
         takenWin: [],
 
@@ -8162,33 +8173,79 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return b;
   }
 
+  function daEnsureSkill(name) {
+    const key =
+      String(name || '')
+        .trim();
+
+    if (!key) {
+      return null;
+    }
+
+    let s =
+      daState.skills.get(key);
+
+    if (!s) {
+      s = {
+        name: key,
+        casts: 0,
+        hits: 0,
+        damage: 0,
+        lastAt: 0,
+      };
+
+      daState.skills.set(
+        key,
+        s
+      );
+    }
+
+    return s;
+  }
+
   function daPeak(win, amount, at, prevMax) {
-    const next = win.filter(
-      (h) => at - h.at <= DA_DPS_WINDOW_MS
-    );
+    const next =
+      win.filter(
+        (h) =>
+          at - h.at <=
+          DA_DPS_WINDOW_MS
+      );
 
     next.push({
       at,
       amount,
     });
 
-    const cur = next.reduce(
-      (sum, h) => sum + h.amount,
-      0
-    );
+    const cur =
+      next.reduce(
+        (sum, h) =>
+          sum + h.amount,
+        0
+      );
 
     return {
       win: next,
-      max: Math.max(prevMax, cur),
+      max:
+        Math.max(
+          prevMax,
+          cur
+        ),
     };
   }
 
-  function daAddEl(map, el, amount) {
-    if (el == null) return;
+  function daAddEl(
+    map,
+    el,
+    amount
+  ) {
+    if (el == null) {
+      return;
+    }
 
     map.set(
       el,
-      (map.get(el) || 0) + amount
+      (map.get(el) || 0) +
+        amount
     );
   }
 
@@ -8200,8 +8257,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     );
   }
 
-  function daRecord(hits, source) {
-    if (!hits || !hits.length) {
+  function daRecord(
+    hits,
+    source
+  ) {
+    if (
+      !hits ||
+      !hits.length
+    ) {
       return false;
     }
 
@@ -8209,7 +8272,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     let any = false;
 
     for (const h of hits) {
-      if (!h || !(h.amount > 0)) {
+      if (
+        !h ||
+        !(h.amount > 0)
+      ) {
         continue;
       }
 
@@ -8222,19 +8288,28 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         continue;
       }
 
-      const b = daEnsure(id);
+      const b =
+        daEnsure(id);
 
       if (h.asDealt) {
-        const p = daPeak(
-          b.dealtWin,
-          h.amount,
-          at,
-          b.dealtMax
-        );
+        const p =
+          daPeak(
+            b.dealtWin,
+            h.amount,
+            at,
+            b.dealtMax
+          );
 
-        b.dealtSum += h.amount;
-        b.dealtWin = p.win;
-        b.dealtMax = p.max;
+        b.dealtSum +=
+          h.amount;
+
+        b.dealtHits++;
+
+        b.dealtWin =
+          p.win;
+
+        b.dealtMax =
+          p.max;
 
         daAddEl(
           b.dealtEl,
@@ -8242,21 +8317,31 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           h.amount
         );
 
-        daState.confirmedHits++;
+        daState
+          .confirmedHits++;
+
         any = true;
       }
 
       if (h.asTaken) {
-        const p = daPeak(
-          b.takenWin,
-          h.amount,
-          at,
-          b.takenMax
-        );
+        const p =
+          daPeak(
+            b.takenWin,
+            h.amount,
+            at,
+            b.takenMax
+          );
 
-        b.takenSum += h.amount;
-        b.takenWin = p.win;
-        b.takenMax = p.max;
+        b.takenSum +=
+          h.amount;
+
+        b.takenHits++;
+
+        b.takenWin =
+          p.win;
+
+        b.takenMax =
+          p.max;
 
         daAddEl(
           b.takenEl,
@@ -8264,7 +8349,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           h.amount
         );
 
-        daState.confirmedHits++;
         any = true;
       }
     }
@@ -8273,59 +8357,95 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       return false;
     }
 
-    if (daState.startedAt == null) {
-      daState.startedAt = at;
+    if (
+      daState.startedAt ==
+      null
+    ) {
+      daState.startedAt =
+        at;
     }
 
-    daState.updatedAt = at;
-    daState.lastSource = source || 'parser';
+    daState.updatedAt =
+      at;
+
+    daState.lastSource =
+      source || 'parser';
 
     daSchedulePaint();
 
     return true;
   }
 
-  // DPS real:
-  // dano acumulado / tempo efetivamente decorrido
   function daDps(sum) {
     if (
       !sum ||
-      daState.startedAt == null ||
-      daState.updatedAt == null
+      daState.startedAt ==
+        null ||
+      daState.updatedAt ==
+        null
     ) {
       return 0;
     }
 
-    const sec = Math.max(
-      (daState.updatedAt - daState.startedAt) / 1000,
-      0.001
-    );
+    const sec =
+      Math.max(
+        (
+          daState.updatedAt -
+          daState.startedAt
+        ) / 1000,
+        0.001
+      );
 
-    return sum / sec;
+    return (
+      sum / sec
+    );
   }
 
-  function daElChips(map, total) {
+  function daSkillDps(
+    damage
+  ) {
+    return daDps(
+      damage
+    );
+  }
+
+  function daElChips(
+    map,
+    total
+  ) {
     if (!map.size) {
-      return '<span class="da-el empty">—</span>';
+      return (
+        '<span class="da-el empty">—</span>'
+      );
     }
 
-    const arr = [...map.entries()]
-      .map(([el, amount]) => ({
-        el,
-        amount,
-        label:
-          DA_ELEMENTS[el] ||
-          ('E' + el),
-        pct:
-          total > 0
-            ? Math.round(
-                (amount / total) * 100
-              )
-            : 0,
-      }))
-      .sort(
-        (a, b) => b.amount - a.amount
-      );
+    const arr =
+      [...map.entries()]
+        .map(
+          ([el, amount]) => ({
+            el,
+            amount,
+            label:
+              DA_ELEMENTS[
+                el
+              ] ||
+              ('E' + el),
+            pct:
+              total > 0
+                ? Math.round(
+                    (
+                      amount /
+                      total
+                    ) * 100
+                  )
+                : 0,
+          })
+        )
+        .sort(
+          (a, b) =>
+            b.amount -
+            a.amount
+        );
 
     return (
       '<span class="da-el">' +
@@ -8337,7 +8457,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             ': ' +
             daFmt(e.amount) +
             '">' +
-            e.label.slice(0, 3) +
+            e.label.slice(
+              0,
+              3
+            ) +
             ' ' +
             e.pct +
             '%</span>'
@@ -8350,88 +8473,142 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   function daName(id) {
     return (
       daState.names.get(id) ||
-      (id === 0
-        ? 'Desconhecido'
-        : 'Player #' + id)
+      (
+        id === 0
+          ? 'Desconhecido'
+          : 'Player #' + id
+      )
     );
   }
 
   function daProject() {
     const hasParty =
       daState.partyIds &&
-      daState.partyIds.size > 0;
+      daState.partyIds.size >
+        0;
 
     const hasNames =
       daState.names &&
-      daState.names.size > 0;
+      daState.names.size >
+        0;
 
     let rows = [
       ...daState.entities.values(),
-    ].filter((b) => daIdOk(b.id));
+    ].filter(
+      (b) =>
+        daIdOk(b.id)
+    );
 
     if (hasParty) {
-      rows = rows.filter((b) =>
-        daState.partyIds.has(b.id)
-      );
-    } else if (hasNames) {
-      rows = rows.filter((b) =>
-        daState.names.has(b.id)
-      );
-    } else {
-      rows = rows
-        .filter(
+      rows =
+        rows.filter(
           (b) =>
-            b.id <= 32 &&
-            (
-              b.dealtSum > 0 ||
-              b.takenSum > 0
+            daState.partyIds.has(
+              b.id
             )
-        )
-        .sort(
-          (a, b) =>
-            (
-              b.dealtSum +
-              b.takenSum
-            ) -
-            (
-              a.dealtSum +
-              a.takenSum
+        );
+    } else if (hasNames) {
+      rows =
+        rows.filter(
+          (b) =>
+            daState.names.has(
+              b.id
             )
-        )
-        .slice(0, 6);
+        );
+    } else {
+      rows =
+        rows
+          .filter(
+            (b) =>
+              b.id <= 32 &&
+              (
+                b.dealtSum > 0 ||
+                b.takenSum > 0
+              )
+          )
+          .sort(
+            (a, b) =>
+              (
+                b.dealtSum +
+                b.takenSum
+              ) -
+              (
+                a.dealtSum +
+                a.takenSum
+              )
+          )
+          .slice(
+            0,
+            8
+          );
     }
 
     return rows
-      .map((b) => ({
-        id: b.id,
-        name: daName(b.id),
+      .map(
+        (b) => ({
+          id: b.id,
+          name:
+            daName(b.id),
 
-        dealtSum: b.dealtSum,
-        dealtMax: b.dealtMax,
-        dealtDps: daDps(b.dealtSum),
+          dealtSum:
+            b.dealtSum,
 
-        takenSum: b.takenSum,
-        takenMax: b.takenMax,
-        takenDps: daDps(b.takenSum),
+          dealtMax:
+            b.dealtMax,
 
-        dealtEl: b.dealtEl,
-        takenEl: b.takenEl,
-      }))
+          dealtDps:
+            daDps(
+              b.dealtSum
+            ),
+
+          dealtHits:
+            b.dealtHits,
+
+          takenSum:
+            b.takenSum,
+
+          takenMax:
+            b.takenMax,
+
+          takenDps:
+            daDps(
+              b.takenSum
+            ),
+
+          takenHits:
+            b.takenHits,
+
+          dealtEl:
+            b.dealtEl,
+
+          takenEl:
+            b.takenEl,
+        })
+      )
       .sort(
         (a, b) =>
-          b.dealtSum - a.dealtSum ||
-          b.takenSum - a.takenSum
+          b.dealtSum -
+          a.dealtSum ||
+          b.takenSum -
+          a.takenSum
       );
   }
 
   function daReset() {
-    const names = daState.names;
-    const partyIds = daState.partyIds;
+    const names =
+      daState.names;
 
-    daState = daCreateState();
+    const partyIds =
+      daState.partyIds;
 
-    daState.names = names;
-    daState.partyIds = partyIds;
+    daState =
+      daCreateState();
+
+    daState.names =
+      names;
+
+    daState.partyIds =
+      partyIds;
 
     daSchedulePaint();
   }
@@ -8441,19 +8618,934 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       return;
     }
 
-    daPaintQueued = true;
+    daPaintQueued =
+      true;
 
-    requestAnimationFrame(() => {
-      daPaintQueued = false;
-      daPaint();
-    });
+    requestAnimationFrame(
+      () => {
+        daPaintQueued =
+          false;
+
+        daPaint();
+      }
+    );
   }
+
+  function daMountPanel() {
+    if (
+      document.getElementById(
+        DA_HOST
+      )
+    ) {
+      return;
+    }
+
+    const host =
+      document.createElement(
+        'div'
+      );
+
+    host.id =
+      DA_HOST;
+
+    host.style.cssText =
+      'position:fixed;' +
+      'right:12px;' +
+      'bottom:12px;' +
+      'width:390px;' +
+      'max-width:50vw;' +
+      'z-index:99998;';
+
+    const shadow =
+      host.attachShadow({
+        mode: 'open',
+      });
+
+    const style =
+      document.createElement(
+        'style'
+      );
+
+    style.textContent =
+      DA_CSS;
+
+    shadow.appendChild(
+      style
+    );
+
+    const root =
+      document.createElement(
+        'div'
+      );
+
+    root.className =
+      'da-root';
+
+    shadow.appendChild(
+      root
+    );
+
+    (
+      document.body ||
+      document.documentElement
+    ).appendChild(
+      host
+    );
+
+    daPaint();
+  }
+    // =====================================================================
+  // PARSER REAL DOS FRAMES SG
+  // =====================================================================
+
+  function daB64(b64) {
+    const bin = atob(b64);
+
+    const out =
+      new Uint8Array(
+        bin.length
+      );
+
+    for (
+      let i = 0;
+      i < bin.length;
+      i++
+    ) {
+      out[i] =
+        bin.charCodeAt(i);
+    }
+
+    return out;
+  }
+
+  function DaReader(buf) {
+    this.b = buf;
+    this.o = 0;
+  }
+
+  DaReader.prototype.rem =
+    function () {
+      return (
+        this.b.length -
+        this.o
+      );
+    };
+
+  DaReader.prototype.u8 =
+    function () {
+      if (
+        this.o >=
+        this.b.length
+      ) {
+        throw new Error(
+          'EOF u8'
+        );
+      }
+
+      return this.b[
+        this.o++
+      ];
+    };
+
+  DaReader.prototype.i8 =
+    function () {
+      const v =
+        this.u8();
+
+      return (
+        v > 0x7f
+          ? v - 0x100
+          : v
+      );
+    };
+
+  DaReader.prototype.u16 =
+    function () {
+      if (
+        this.rem() < 2
+      ) {
+        throw new Error(
+          'EOF u16'
+        );
+      }
+
+      const v =
+        this.b[this.o] |
+        (
+          this.b[
+            this.o + 1
+          ] << 8
+        );
+
+      this.o += 2;
+
+      return v;
+    };
+
+  DaReader.prototype.bytes =
+    function (n) {
+      if (
+        this.rem() < n
+      ) {
+        throw new Error(
+          'EOF bytes'
+        );
+      }
+
+      const out =
+        this.b.slice(
+          this.o,
+          this.o + n
+        );
+
+      this.o += n;
+
+      return out;
+    };
+
+  DaReader.prototype.str =
+    function () {
+      const len =
+        this.u16();
+
+      if (
+        len < 0 ||
+        len > 4096 ||
+        this.rem() < len
+      ) {
+        throw new Error(
+          'string inválida'
+        );
+      }
+
+      return new TextDecoder()
+        .decode(
+          this.bytes(len)
+        );
+    };
+
+  // kind -> elemento.
+  // Mantemos a mesma convenção utilizada
+  // pelo Analyzer anterior.
+  function daElementFromKind(
+    kind
+  ) {
+    return (
+      (kind >> 8) &
+      0xff
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // 0x1c
+  //
+  // Estrutura observada nos frames reais:
+  //
+  // SG
+  // opcode 0x1c
+  // stringCount
+  // strings[]
+  // ...
+  // registros de combate
+  //
+  // Nos frames capturados, cada registro F8 observado
+  // possui a área necessária para extrair:
+  //
+  // kind
+  // amount
+  // attacker/id
+  //
+  // Não tentamos interpretar bytes desconhecidos
+  // além do necessário.
+  // ---------------------------------------------------------------------
+
+  function daParse1c(
+    buf
+  ) {
+    const r =
+      new DaReader(buf);
+
+    const result = {
+      skill: '',
+      strings: [],
+      dealtHits: [],
+      takenHits: [],
+    };
+
+    try {
+      // SG + tamanho + opcode
+      if (
+        r.rem() < 4
+      ) {
+        return result;
+      }
+
+      if (
+        r.u8() !== 0x53 ||
+        r.u8() !== 0x47
+      ) {
+        return result;
+      }
+
+      r.u8();
+
+      const op =
+        r.u8();
+
+      if (
+        op !== 0x1c
+      ) {
+        return result;
+      }
+
+      if (
+        r.rem() < 1
+      ) {
+        return result;
+      }
+
+      const stringCount =
+        r.u8();
+
+      if (
+        stringCount >
+        64
+      ) {
+        throw new Error(
+          'stringCount inválido'
+        );
+      }
+
+      for (
+        let i = 0;
+        i < stringCount;
+        i++
+      ) {
+        result.strings.push(
+          r.str()
+        );
+      }
+
+      // Pela captura real:
+      // a primeira string é o nome da ação/skill.
+      result.skill =
+        (
+          result.strings[0] ||
+          ''
+        ).trim();
+
+      daState.lastSpellStrings =
+        result.strings.slice(
+          0,
+          32
+        );
+
+      // -----------------------------------------------------------------
+      // A partir daqui percorremos os registros conhecidos.
+      //
+      // Não assumimos que todo byte restante é dano.
+      // Procuramos apenas estruturas F8 válidas.
+      // -----------------------------------------------------------------
+
+      while (
+        r.rem() >= 13
+      ) {
+        const start =
+          r.o;
+
+        const tag =
+          r.u8();
+
+        // ---------------------------------------------------------------
+        // HIT CAUSADO
+        // ---------------------------------------------------------------
+        if (
+          tag === 0xf8 ||
+          tag === 0x78
+        ) {
+          if (
+            r.rem() < 12
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          // Dois campos posicionais/auxiliares.
+          r.i8();
+          r.i8();
+
+          // Duas referências/IDs.
+          const ref1 =
+            r.u16();
+
+          const ref2 =
+            r.u16();
+
+          // Identificador do atacante.
+          const attacker =
+            r.u8();
+
+          // Há frames nos quais existe ainda um byte
+          // auxiliar imediatamente após o atacante.
+          //
+          // Não o utilizamos para calcular dano; apenas
+          // avançamos se ele fizer parte do registro.
+          if (
+            r.rem() > 0
+          ) {
+            r.u8();
+          }
+
+          if (
+            amount > 0
+          ) {
+            result.dealtHits.push({
+              runtimePlayerId:
+                attacker || 0,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              skill:
+                result.skill,
+
+              kind,
+
+              ref1,
+              ref2,
+            });
+          }
+
+          continue;
+        }
+
+        // ---------------------------------------------------------------
+        // HIT RECEBIDO
+        // ---------------------------------------------------------------
+        if (
+          tag >= 0x80 &&
+          tag <= 0x87
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            amount > 0
+          ) {
+            result.takenHits.push({
+              runtimePlayerId,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              skill:
+                result.skill,
+
+              kind,
+            });
+          }
+
+          continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Não reconhecido.
+        //
+        // Avançar 1 byte é proposital: queremos tentar
+        // encontrar o próximo registro conhecido sem
+        // inventar uma estrutura para o restante.
+        // ---------------------------------------------------------------
+
+        r.o =
+          start + 1;
+      }
+
+    } catch (e) {
+      daState.lastErr =
+        String(
+          e &&
+          e.message
+            ? e.message
+            : e
+        ).slice(
+          0,
+          100
+        );
+    }
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------
+  // REGISTRO DAS SKILLS
+  // ---------------------------------------------------------------------
+
+  function daRecordSkill(
+    result
+  ) {
+    if (
+      !result ||
+      !result.skill
+    ) {
+      return;
+    }
+
+    const skill =
+      daEnsureSkill(
+        result.skill
+      );
+
+    if (!skill) {
+      return;
+    }
+
+    // Um frame 0x1c representa uma ocorrência
+    // da ação observada.
+    skill.casts++;
+
+    skill.lastAt =
+      daNow();
+
+    for (
+      const h
+      of result.dealtHits
+    ) {
+      if (
+        !(h.amount > 0)
+      ) {
+        continue;
+      }
+
+      skill.hits++;
+      skill.damage +=
+        h.amount;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // DADOS DE COMBATE 0x19 / 0x12
+  //
+  // Mantemos um parser conservador para o dano
+  // por personagem.
+  // ---------------------------------------------------------------------
+
+  function daParseCombatFrame(
+    buf
+  ) {
+    const r =
+      new DaReader(buf);
+
+    const result = {
+      dealtHits: [],
+      takenHits: [],
+    };
+
+    try {
+      if (
+        r.rem() < 4
+      ) {
+        return result;
+      }
+
+      if (
+        r.u8() !== 0x53 ||
+        r.u8() !== 0x47
+      ) {
+        return result;
+      }
+
+      r.u8();
+
+      const op =
+        r.u8();
+
+      if (
+        op !== 0x19 &&
+        op !== 0x12
+      ) {
+        return result;
+      }
+
+      // ---------------------------------------------------------------
+      // 0x19 e 0x12 têm formatos diferentes dependendo
+      // do evento. O parser abaixo procura estruturas
+      // confirmadas sem usar fallback heurístico para
+      // criar dano inexistente.
+      // ---------------------------------------------------------------
+
+      while (
+        r.rem() >= 8
+      ) {
+        const start =
+          r.o;
+
+        const tag =
+          r.u8();
+
+        if (
+          tag >= 0x80 &&
+          tag <= 0x87
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            amount > 0
+          ) {
+            result.takenHits.push({
+              runtimePlayerId,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
+          continue;
+        }
+
+        if (
+          tag === 0xf8 ||
+          tag === 0x78
+        ) {
+          if (
+            r.rem() < 12
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          r.u16();
+          r.u16();
+
+          const attacker =
+            r.u8();
+
+          if (
+            r.rem() > 0
+          ) {
+            r.u8();
+          }
+
+          if (
+            amount > 0
+          ) {
+            result.dealtHits.push({
+              runtimePlayerId:
+                attacker || 0,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
+          continue;
+        }
+
+        // Formatos simples observados
+        // em eventos de combate.
+        if (
+          tag <= 0x07
+        ) {
+          if (
+            r.rem() < 7
+          ) {
+            r.o =
+              start;
+
+            break;
+          }
+
+          const kind =
+            r.u16();
+
+          const amount =
+            r.u16();
+
+          r.i8();
+          r.i8();
+
+          const runtimePlayerId =
+            r.u8();
+
+          if (
+            amount > 0
+          ) {
+            result.takenHits.push({
+              runtimePlayerId,
+
+              amount,
+
+              element:
+                daElementFromKind(
+                  kind
+                ),
+
+              kind,
+            });
+          }
+
+          continue;
+        }
+
+        r.o =
+          start + 1;
+      }
+
+    } catch (e) {
+      daState.lastErr =
+        String(
+          e &&
+          e.message
+            ? e.message
+            : e
+        ).slice(
+          0,
+          100
+        );
+    }
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------
+  // PROCESSAMENTO OFICIAL DOS FRAMES
+  // ---------------------------------------------------------------------
+
+  function daHandleFrame(
+    opcode,
+    b64,
+    source
+  ) {
+    // ---------------------------------------------------------------
+    // MUITO IMPORTANTE:
+    //
+    // o bridge envia o mesmo frame como:
+    //
+    //   tipo = "sg"
+    //   tipo = "combate"
+    //
+    // O Analyzer oficial só aceita "combate".
+    //
+    // Isso evita contar duas vezes o mesmo dano.
+    // ---------------------------------------------------------------
+
+    if (
+      source !== 'combate'
+    ) {
+      daState.ignoredSgFrames++;
+      return;
+    }
+
+    let buf;
+
+    try {
+      buf =
+        daB64(
+          String(b64)
+        );
+    } catch (e) {
+      daState.invalidFrames++;
+
+      daState.lastErr =
+        'Base64 inválido';
+
+      daSchedulePaint();
+
+      return;
+    }
+
+    daState.frames++;
+
+    daState.lastLen =
+      buf.length;
+
+    daState.lastOp =
+      opcode;
+
+    if (
+      opcode === 0x1c
+    ) {
+      const parsed =
+        daParse1c(
+          buf
+        );
+
+      if (
+        parsed.skill
+      ) {
+        daRecordSkill(
+          parsed
+        );
+      }
+
+      if (
+        parsed.dealtHits.length ||
+        parsed.takenHits.length
+      ) {
+        daRecord(
+          [
+            ...parsed.dealtHits,
+            ...parsed.takenHits,
+          ],
+          '0x1c'
+        );
+      }
+
+      if (
+        parsed.skill
+      ) {
+        daState.parsedFrames++;
+        daState.lastErr =
+          null;
+
+        daSchedulePaint();
+
+        return;
+      }
+
+      daState.invalidFrames++;
+      daState.lastErr =
+        '0x1c sem skill';
+
+      daSchedulePaint();
+
+      return;
+    }
+
+    if (
+      opcode === 0x19 ||
+      opcode === 0x12
+    ) {
+      const parsed =
+        daParseCombatFrame(
+          buf
+        );
+
+      const hits = [
+        ...parsed.dealtHits,
+        ...parsed.takenHits,
+      ];
+
+      if (
+        hits.length
+      ) {
+        daState.parsedFrames++;
+        daState.lastErr =
+          null;
+
+        daRecord(
+          hits,
+          '0x' +
+          opcode.toString(16)
+        );
+      } else {
+        daState.invalidFrames++;
+
+        daState.lastErr =
+          'frame sem hit confirmado';
+      }
+
+      daSchedulePaint();
+
+      return;
+    }
+
+    daState.invalidFrames++;
+
+    daState.lastErr =
+      'opcode não suportado';
+
+    daSchedulePaint();
+  }
+    // =====================================================================
+  // INTERFACE DO DAMAGE ANALYZER
+  // =====================================================================
 
   function daPaint() {
     const host =
-      document.getElementById(DA_HOST);
+      document.getElementById(
+        DA_HOST
+      );
 
-    if (!host || !host.shadowRoot) {
+    if (
+      !host ||
+      !host.shadowRoot
+    ) {
       return;
     }
 
@@ -8466,7 +9558,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       return;
     }
 
-    const rows = daProject();
+    const rows =
+      daProject();
 
     const elapsed =
       daState.startedAt != null &&
@@ -8477,20 +9570,26 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           ) / 1000
         : 0;
 
+    const skills =
+      [
+        ...daState.skills.values(),
+      ]
+        .sort(
+          (a, b) =>
+            b.damage -
+            a.damage
+        )
+        .slice(
+          0,
+          12
+        );
+
     const status =
-      'bridge ' +
-      (daBridgeInfo.bv || '?') +
-      (
-        daBridgeInfo.socket == null
-          ? ''
-          : (
-              daBridgeInfo.socket
-                ? ' · ws ON'
-                : ' · ws OFF'
-            )
-      ) +
+      'v2.0.0' +
       ' · tempo ' +
-      Math.floor(elapsed) +
+      Math.floor(
+        elapsed
+      ) +
       's' +
       ' · frames ' +
       daState.frames +
@@ -8498,12 +9597,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       daState.parsedFrames +
       ' · hits ' +
       daState.confirmedHits +
+      ' · skills ' +
+      daState.skills.size +
+      ' · sg ignorados ' +
+      daState.ignoredSgFrames +
       ' · inválidos ' +
       daState.invalidFrames +
       (
         daState.lastOp != null
           ? ' · op 0x' +
-            daState.lastOp.toString(16)
+            daState.lastOp.toString(
+              16
+            )
           : ''
       ) +
       (
@@ -8514,32 +9619,28 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           : ''
       ) +
       (
-        daState.lastSource
-          ? ' · ' +
-            daState.lastSource
-          : ''
-      ) +
-      (
         daState.lastErr
-          ? ' · err: ' +
+          ? ' · ' +
             daState.lastErr
           : ''
       );
 
-    const body =
+    // ---------------------------------------------------------------
+    // PLAYERS
+    // ---------------------------------------------------------------
+
+    const playerHtml =
       rows.length === 0
         ? (
             '<div class="da-empty">' +
             'Aguardando combate…' +
-            '</div>' +
-            '<div class="da-status">' +
-            status +
             '</div>'
           )
         : (
             '<div class="da-list">' +
-            '<div class="da-head">' +
-            '<span></span>' +
+
+            '<div class="da-head player-head">' +
+            '<span>Player</span>' +
             '<span>Dealt</span>' +
             '<span>Taken</span>' +
             '</div>' +
@@ -8558,18 +9659,26 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
                   '<div class="da-metric">' +
 
                   '<div class="da-sum">' +
-                  daFmt(r.dealtSum) +
+                  daFmt(
+                    r.dealtSum
+                  ) +
                   '</div>' +
 
                   '<div class="da-dps">' +
-                  daFmt(r.dealtMax) +
-                  ' BURST 1s' +
-                  '</div>' +
+                  daFmt(
+                    r.dealtDps
+                  ) +
+                  ' DPS</div>' +
 
                   '<div class="da-dps">' +
-                  daFmt(r.dealtDps) +
-                  ' DPS' +
-                  '</div>' +
+                  daFmt(
+                    r.dealtMax
+                  ) +
+                  ' BURST 1s</div>' +
+
+                  '<div class="da-dps">' +
+                  r.dealtHits +
+                  ' hits</div>' +
 
                   daElChips(
                     r.dealtEl,
@@ -8580,19 +9689,27 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
                   '<div class="da-metric">' +
 
-                  '<div class="da-sum">' +
-                  daFmt(r.takenSum) +
+                  '<div class="da-sum taken">' +
+                  daFmt(
+                    r.takenSum
+                  ) +
                   '</div>' +
 
                   '<div class="da-dps">' +
-                  daFmt(r.takenMax) +
-                  ' BURST 1s' +
-                  '</div>' +
+                  daFmt(
+                    r.takenDps
+                  ) +
+                  ' DPS</div>' +
 
                   '<div class="da-dps">' +
-                  daFmt(r.takenDps) +
-                  ' DPS' +
-                  '</div>' +
+                  daFmt(
+                    r.takenMax
+                  ) +
+                  ' BURST 1s</div>' +
+
+                  '<div class="da-dps">' +
+                  r.takenHits +
+                  ' hits</div>' +
 
                   daElChips(
                     r.takenEl,
@@ -8605,10 +9722,68 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               )
               .join('') +
 
+            '</div>'
+          );
+
+    // ---------------------------------------------------------------
+    // SKILLS
+    // ---------------------------------------------------------------
+
+    const skillHtml =
+      skills.length === 0
+        ? (
+            '<div class="da-empty small">' +
+            'Nenhuma skill observada ainda.' +
+            '</div>'
+          )
+        : (
+            '<div class="da-skill-list">' +
+
+            '<div class="da-skill-head">' +
+            '<span>Skill</span>' +
+            '<span>Cast</span>' +
+            '<span>Hits</span>' +
+            '<span>Dano</span>' +
+            '<span>DPS</span>' +
             '</div>' +
 
-            '<div class="da-status">' +
-            status +
+            skills
+              .map(
+                (s) =>
+                  '<div class="da-skill-row">' +
+
+                  '<div class="da-skill-name" title="' +
+                  s.name +
+                  '">' +
+                  s.name +
+                  '</div>' +
+
+                  '<div class="da-skill-num">' +
+                  s.casts +
+                  '</div>' +
+
+                  '<div class="da-skill-num">' +
+                  s.hits +
+                  '</div>' +
+
+                  '<div class="da-skill-damage">' +
+                  daFmt(
+                    s.damage
+                  ) +
+                  '</div>' +
+
+                  '<div class="da-skill-dps">' +
+                  daFmt(
+                    daSkillDps(
+                      s.damage
+                    )
+                  ) +
+                  '</div>' +
+
+                  '</div>'
+              )
+              .join('') +
+
             '</div>'
           );
 
@@ -8623,31 +9798,49 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
       '<header>' +
 
-      '<button type="button" ' +
-      'class="da-toggle">' +
-
+      '<button type="button" class="da-toggle">' +
       '<span class="da-title">' +
-      'Damage Analyzer' +
+      'Damage Analyzer v2' +
       '</span>' +
-
       '</button>' +
 
-      '<button type="button" ' +
-      'class="da-reset">' +
+      '<button type="button" class="da-reset">' +
       'Reset' +
       '</button>' +
 
       '</header>' +
 
       '<div class="da-body">' +
-      body +
+
+      '<section class="da-section">' +
+      '<div class="da-section-title">' +
+      'DANO POR PLAYER' +
+      '</div>' +
+      playerHtml +
+      '</section>' +
+
+      '<section class="da-section">' +
+      '<div class="da-section-title">' +
+      'DANO POR SKILL' +
+      '</div>' +
+      skillHtml +
+      '</section>' +
+
+      '<div class="da-status">' +
+      status +
+      '</div>' +
+
       '</div>' +
 
       '</div>';
 
-    root
-      .querySelector('.da-toggle')
-      ?.addEventListener(
+    const toggle =
+      root.querySelector(
+        '.da-toggle'
+      );
+
+    if (toggle) {
+      toggle.addEventListener(
         'click',
         () => {
           daCollapsed =
@@ -8663,14 +9856,26 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           daPaint();
         }
       );
+    }
 
-    root
-      .querySelector('.da-reset')
-      ?.addEventListener(
-        'click',
-        () => daReset()
+    const reset =
+      root.querySelector(
+        '.da-reset'
       );
+
+    if (reset) {
+      reset.addEventListener(
+        'click',
+        () => {
+          daReset();
+        }
+      );
+    }
   }
+
+  // =====================================================================
+  // CSS
+  // =====================================================================
 
   const DA_CSS =
     ':host{' +
@@ -8685,11 +9890,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     'display:flex;' +
     'flex-direction:column;' +
     'gap:6px;' +
-    'padding:8px 10px;' +
+    'padding:9px 10px;' +
     'background:linear-gradient(' +
     '180deg,' +
-    'rgba(28,36,39,.9),' +
-    'rgba(11,16,17,.96)' +
+    'rgba(28,36,39,.96),' +
+    'rgba(11,16,17,.98)' +
     ');' +
     'border:1px solid rgba(120,90,40,.35);' +
     'border-radius:6px;' +
@@ -8724,7 +9929,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     'background:transparent;' +
     'color:#cdbe91;' +
     'cursor:pointer;' +
-    'font-size:12px;' +
+    'font-size:11px;' +
     'font-weight:700;' +
     'text-transform:uppercase;' +
     '}' +
@@ -8733,36 +9938,59 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     'display:none;' +
     '}' +
 
+    '.da-body{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'gap:10px;' +
+    '}' +
+
+    '.da-section{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'gap:5px;' +
+    '}' +
+
+    '.da-section-title{' +
+    'color:#a88746;' +
+    'font-size:10px;' +
+    'font-weight:800;' +
+    'letter-spacing:.5px;' +
+    'border-bottom:1px solid rgba(120,90,40,.25);' +
+    'padding-bottom:3px;' +
+    '}' +
+
     '.da-list{' +
     'display:flex;' +
     'flex-direction:column;' +
     'gap:5px;' +
     '}' +
 
-    '.da-head,.da-row{' +
+    '.da-head,' +
+    '.da-row{' +
     'display:grid;' +
     'grid-template-columns:' +
-    'minmax(56px,.85fr) 1fr 1fr;' +
+    'minmax(75px,.8fr) 1fr 1fr;' +
     'column-gap:6px;' +
     'align-items:start;' +
     '}' +
 
     '.da-head{' +
-    'color:#a09b8c;' +
-    'font-size:11px;' +
+    'color:#817b6e;' +
+    'font-size:9px;' +
+    'text-transform:uppercase;' +
     '}' +
 
     '.da-head span:not(:first-child){' +
     'text-align:right;' +
     '}' +
 
-    '.da-row+.da-row{' +
+    '.da-row + .da-row{' +
     'padding-top:6px;' +
-    'border-top:1px solid rgba(120,90,40,.2);' +
+    'border-top:1px solid rgba(120,90,40,.18);' +
     '}' +
 
     '.da-name{' +
-    'font-size:12px;' +
+    'font-size:11px;' +
     'font-weight:600;' +
     'overflow:hidden;' +
     'text-overflow:ellipsis;' +
@@ -8780,13 +10008,17 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     '.da-sum{' +
     'color:#c89b3c;' +
     'font-size:12px;' +
-    'font-weight:600;' +
+    'font-weight:700;' +
     'font-variant-numeric:tabular-nums;' +
     '}' +
 
+    '.da-sum.taken{' +
+    'color:#9a8f82;' +
+    '}' +
+
     '.da-dps{' +
-    'color:#5b5a56;' +
-    'font-size:10px;' +
+    'color:#777269;' +
+    'font-size:9px;' +
     'font-variant-numeric:tabular-nums;' +
     '}' +
 
@@ -8799,1014 +10031,100 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     '}' +
 
     '.da-chip{' +
-    'color:#a09b8c;' +
-    'font-size:10px;' +
+    'color:#8c877d;' +
+    'font-size:8px;' +
     'font-variant-numeric:tabular-nums;' +
     '}' +
 
     '.da-el.empty{' +
-    'color:#5b5a56;' +
-    'font-size:10px;' +
+    'color:#56524b;' +
+    'font-size:9px;' +
+    '}' +
+
+    '.da-skill-list{' +
+    'display:flex;' +
+    'flex-direction:column;' +
+    'gap:3px;' +
+    'max-height:240px;' +
+    'overflow-y:auto;' +
+    'padding-right:2px;' +
+    '}' +
+
+    '.da-skill-head,' +
+    '.da-skill-row{' +
+    'display:grid;' +
+    'grid-template-columns:' +
+    'minmax(115px,2fr) .55fr .55fr 1fr 1fr;' +
+    'gap:5px;' +
+    'align-items:center;' +
+    '}' +
+
+    '.da-skill-head{' +
+    'color:#817b6e;' +
+    'font-size:8px;' +
+    'text-transform:uppercase;' +
+    '}' +
+
+    '.da-skill-head span:not(:first-child){' +
+    'text-align:right;' +
+    '}' +
+
+    '.da-skill-row{' +
+    'padding:3px 0;' +
+    'border-top:1px solid rgba(120,90,40,.12);' +
+    '}' +
+
+    '.da-skill-name{' +
+    'font-size:9px;' +
+    'color:#b5aa91;' +
+    'overflow:hidden;' +
+    'text-overflow:ellipsis;' +
+    'white-space:nowrap;' +
+    '}' +
+
+    '.da-skill-num,' +
+    '.da-skill-damage,' +
+    '.da-skill-dps{' +
+    'font-size:9px;' +
+    'text-align:right;' +
+    'font-variant-numeric:tabular-nums;' +
+    '}' +
+
+    '.da-skill-num{' +
+    'color:#777269;' +
+    '}' +
+
+    '.da-skill-damage{' +
+    'color:#c89b3c;' +
+    '}' +
+
+    '.da-skill-dps{' +
+    'color:#a39b8c;' +
     '}' +
 
     '.da-empty{' +
     'text-align:center;' +
-    'color:#a09b8c;' +
-    'font-size:12px;' +
-    'padding:8px 0 2px;' +
+    'color:#918b80;' +
+    'font-size:11px;' +
+    'padding:7px 0;' +
+    '}' +
+
+    '.da-empty.small{' +
+    'font-size:9px;' +
+    'padding:5px 0;' +
     '}' +
 
     '.da-status{' +
     'text-align:center;' +
-    'color:#6a6558;' +
-    'font-size:9px;' +
-    'padding-top:4px;' +
+    'color:#625d53;' +
+    'font-size:8px;' +
+    'padding-top:3px;' +
     'word-break:break-all;' +
     '}';
 
-  function daMountPanel() {
-    if (
-      document.getElementById(
-        DA_HOST
-      )
-    ) {
-      return;
-    }
-
-    const host =
-      document.createElement('div');
-
-    host.id = DA_HOST;
-
-    host.style.cssText =
-      'position:fixed;' +
-      'right:12px;' +
-      'bottom:12px;' +
-      'width:320px;' +
-      'max-width:42vw;' +
-      'z-index:99998;';
-
-    const shadow =
-      host.attachShadow({
-        mode: 'open',
-      });
-
-    const style =
-      document.createElement(
-        'style'
-      );
-
-    style.textContent = DA_CSS;
-
-    shadow.appendChild(style);
-
-    const root =
-      document.createElement('div');
-
-    root.className = 'da-root';
-
-    shadow.appendChild(root);
-
-    (
-      document.body ||
-      document.documentElement
-    ).appendChild(host);
-
-    daPaint();
-  }
-
-  function daB64(b64) {
-    const bin = atob(b64);
-
-    const u8 =
-      new Uint8Array(
-        bin.length
-      );
-
-    for (
-      let i = 0;
-      i < bin.length;
-      i++
-    ) {
-      u8[i] =
-        bin.charCodeAt(i);
-    }
-
-    return u8;
-  }
-
-  function DaReader(buf) {
-    this.b = buf;
-    this.o = 0;
-  }
-
-  DaReader.prototype.rem =
-    function () {
-      return (
-        this.b.length -
-        this.o
-      );
-    };
-
-  DaReader.prototype.u8 =
-    function () {
-      if (
-        this.o >=
-        this.b.length
-      ) {
-        throw new Error(
-          'eof'
-        );
-      }
-
-      return this.b[
-        this.o++
-      ];
-    };
-
-  DaReader.prototype.i8 =
-    function () {
-      const v =
-        this.u8();
-
-      return v > 0x7f
-        ? v - 0x100
-        : v;
-    };
-
-  DaReader.prototype.u16 =
-    function () {
-      if (
-        this.rem() < 2
-      ) {
-        throw new Error(
-          'eof16'
-        );
-      }
-
-      const v =
-        this.b[this.o] |
-        (
-          this.b[
-            this.o + 1
-          ] << 8
-        );
-
-      this.o += 2;
-
-      return v;
-    };
-
-  DaReader.prototype.bytes =
-    function (n) {
-      if (
-        this.rem() < n
-      ) {
-        throw new Error(
-          'eofn'
-        );
-      }
-
-      const s =
-        this.b.slice(
-          this.o,
-          this.o + n
-        );
-
-      this.o += n;
-
-      return s;
-    };
-
-  DaReader.prototype.str =
-    function () {
-      const n =
-        this.u16();
-
-      if (
-        n <= 0 ||
-        n > 256 ||
-        this.rem() < n
-      ) {
-        throw new Error(
-          'str'
-        );
-      }
-
-      return new TextDecoder()
-        .decode(
-          this.bytes(n)
-        );
-    };
-
-  function daSchool(kind) {
-    return (
-      (kind >> 8) &
-      0xff
-    );
-  }
-
-  function daTakenOk(
-    category,
-    kind,
-    amount
-  ) {
-    if (!(amount > 0)) {
-      return false;
-    }
-
-    const isRestore =
-      (kind & 0x88) !== 0;
-
-    if (isRestore) {
-      return false;
-    }
-
-    const school =
-      daSchool(kind);
-
-    if (
-      school === 5 ||
-      school === 7
-    ) {
-      return false;
-    }
-
-    return (
-      category === 0 ||
-      category === 4 ||
-      (
-        category >= 0 &&
-        category <= 7
-      )
-    );
-  }
-
-  function daParseCombatFloat(r) {
-    const hits = [];
-
-    const count =
-      r.u16();
-
-    if (count > 512) {
-      return hits;
-    }
-
-    for (
-      let i = 0;
-      i < count &&
-      r.rem() >= 8;
-      i++
-    ) {
-      const category =
-        r.u8();
-
-      const kind =
-        r.u16();
-
-      const amount =
-        r.u16();
-
-      r.i8();
-      r.i8();
-
-      const runtimePlayerId =
-        r.u8();
-
-      if (
-        daTakenOk(
-          category,
-          kind,
-          amount
-        )
-      ) {
-        hits.push({
-          runtimePlayerId,
-          amount,
-          element:
-            daSchool(kind),
-          asTaken: true,
-        });
-      }
-    }
-
-    return hits;
-  }
-
-  function daParseAutoAttack(r) {
-    const out = [];
-    const start = r.o;
-
-    try {
-      const stringCount =
-        r.u8();
-
-      if (
-        stringCount > 64
-      ) {
-        r.o = start;
-        return out;
-      }
-
-      const strings = [];
-
-      for (
-        let i = 0;
-        i < stringCount;
-        i++
-      ) {
-        strings.push(
-          r.str()
-        );
-      }
-
-      daState.lastSpellStrings =
-        strings.slice(0, 16);
-
-      if (
-        r.rem() < 2
-      ) {
-        return out;
-      }
-
-      const recordCount =
-        r.u16();
-
-      if (
-        recordCount > 512
-      ) {
-        return out;
-      }
-
-      for (
-        let i = 0;
-        i < recordCount &&
-        r.rem() > 0;
-        i++
-      ) {
-        const tag =
-          r.u8();
-
-        if (
-          tag <= 0x07
-        ) {
-          if (
-            r.rem() < 7
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          const runtimePlayerId =
-            r.u8();
-
-          if (
-            daTakenOk(
-              tag,
-              kind,
-              amount
-            )
-          ) {
-            out.push({
-              runtimePlayerId,
-              amount,
-              element:
-                daSchool(kind),
-              asTaken: true,
-            });
-          }
-        } else if (
-          tag === 0xf8 ||
-          tag === 0x78
-        ) {
-          if (
-            r.rem() < 11
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          r.u16();
-          r.u16();
-
-          const attacker =
-            r.u8();
-
-          const refCount =
-            r.u8();
-
-          if (
-            refCount < 1 ||
-            refCount > 6
-          ) {
-            break;
-          }
-
-          for (
-            let j = 0;
-            j < refCount + 1 &&
-            r.rem() > 0;
-            j++
-          ) {
-            r.u8();
-          }
-
-          if (
-            amount > 0
-          ) {
-            out.push({
-              runtimePlayerId:
-                attacker || 0,
-              amount,
-              element:
-                daSchool(kind),
-              asDealt: true,
-            });
-          }
-        } else if (
-          tag >= 0x80 &&
-          tag <= 0x87
-        ) {
-          if (
-            r.rem() < 7
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          const runtimePlayerId =
-            r.u8();
-
-          if (
-            daTakenOk(
-              tag & 0x7f,
-              kind,
-              amount
-            )
-          ) {
-            out.push({
-              runtimePlayerId,
-              amount,
-              element:
-                daSchool(kind),
-              asTaken: true,
-            });
-          }
-        } else {
-          break;
-        }
-      }
-    } catch (e) {
-      daState.lastErr =
-        String(
-          e && e.message
-            ? e.message
-            : e
-        ).slice(0, 60);
-    }
-
-    return out;
-  }
-
-  function daParseSpellCast(r) {
-    const out = [];
-
-    try {
-      const stringCount =
-        r.u8();
-
-      if (
-        stringCount > 64
-      ) {
-        return out;
-      }
-
-      const strings = [];
-
-      for (
-        let i = 0;
-        i < stringCount;
-        i++
-      ) {
-        strings.push(
-          r.str()
-        );
-      }
-
-      // Guarda strings para investigação futura
-      // de nomes de skills/spells.
-      daState.lastSpellStrings =
-        strings.slice(0, 16);
-
-      const actorCount =
-        r.u8();
-
-      if (
-        actorCount > 32
-      ) {
-        return out;
-      }
-
-      const actors = [];
-
-      for (
-        let i = 0;
-        i < actorCount;
-        i++
-      ) {
-        const tag =
-          r.u8();
-
-        const runtimePlayerId =
-          r.u8();
-
-        r.u8();
-        r.u8();
-
-        if (
-          tag === 0x1f &&
-          r.rem() > 0
-        ) {
-          r.u8();
-        }
-
-        actors.push(
-          runtimePlayerId
-        );
-      }
-
-      if (
-        r.rem() < 2
-      ) {
-        return out;
-      }
-
-      const recordCount =
-        r.u16();
-
-      if (
-        recordCount > 512
-      ) {
-        return out;
-      }
-
-      for (
-        let i = 0;
-        i < recordCount &&
-        r.rem() > 0;
-        i++
-      ) {
-        const tag =
-          r.u8();
-
-        if (
-          tag >= 0x80 &&
-          tag <= 0x87
-        ) {
-          if (
-            r.rem() < 7
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          const runtimePlayerId =
-            r.u8();
-
-          if (
-            daTakenOk(
-              tag & 0x7f,
-              kind,
-              amount
-            )
-          ) {
-            out.push({
-              runtimePlayerId,
-              amount,
-              element:
-                daSchool(kind),
-              asTaken: true,
-            });
-          }
-        } else if (
-          tag === 0xf8 ||
-          tag === 0x78
-        ) {
-          if (
-            r.rem() < 11
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          r.u16();
-          r.u16();
-
-          const actorIndex =
-            r.u8();
-
-          if (
-            r.rem() > 0
-          ) {
-            r.u8();
-          }
-
-          const attacker =
-            actors[
-              actorIndex
-            ] != null
-              ? actors[
-                  actorIndex
-                ]
-              : 0;
-
-          if (
-            amount > 0
-          ) {
-            out.push({
-              runtimePlayerId:
-                attacker,
-              amount,
-              element:
-                daSchool(kind),
-              asDealt: true,
-            });
-          }
-        } else if (
-          tag <= 0x07
-        ) {
-          if (
-            r.rem() < 7
-          ) {
-            break;
-          }
-
-          const kind =
-            r.u16();
-
-          const amount =
-            r.u16();
-
-          r.i8();
-          r.i8();
-
-          const runtimePlayerId =
-            r.u8();
-
-          if (
-            daTakenOk(
-              tag,
-              kind,
-              amount
-            )
-          ) {
-            out.push({
-              runtimePlayerId,
-              amount,
-              element:
-                daSchool(kind),
-              asTaken: true,
-            });
-          }
-        } else {
-          break;
-        }
-      }
-    } catch (e) {
-      daState.lastErr =
-        String(
-          e && e.message
-            ? e.message
-            : e
-        ).slice(0, 60);
-    }
-
-    return out;
-  }
-
-  function daHandleCombatFrame(
-    opcode,
-    b64
-  ) {
-    try {
-      const buf =
-        daB64(
-          typeof b64 === 'string'
-            ? b64
-            : String(b64)
-        );
-
-      daState.frames++;
-      daState.lastLen =
-        buf.length;
-
-      if (
-        buf.length < 4 ||
-        buf[0] !== 0x53 ||
-        buf[1] !== 0x47
-      ) {
-        daState.invalidFrames++;
-        daState.lastErr =
-          'not-SG';
-
-        daSchedulePaint();
-        return;
-      }
-
-      const op =
-        buf[3];
-
-      daState.lastOp =
-        op;
-
-      const r =
-        new DaReader(buf);
-
-      r.o = 4;
-
-      let hits = [];
-
-      if (
-        op === 0x1c
-      ) {
-        hits =
-          daParseSpellCast(r);
-      } else if (
-        op === 0x19 ||
-        op === 0x12
-      ) {
-        if (
-          op === 0x19 &&
-          r.rem() > 0 &&
-          r.b[r.o] === 0
-        ) {
-          r.u8();
-
-          hits =
-            daParseCombatFloat(r);
-        } else {
-          hits =
-            daParseAutoAttack(r);
-        }
-      } else {
-        daState.invalidFrames++;
-        daState.lastErr =
-          'opcode não suportado';
-
-        daSchedulePaint();
-        return;
-      }
-
-      if (hits.length) {
-        daState.parsedFrames++;
-        daState.lastErr = null;
-
-        daRecord(
-          hits,
-          'confirmed'
-        );
-      } else {
-        daState.invalidFrames++;
-
-        daState.lastErr =
-          'frame sem hit confirmado';
-
-        daSchedulePaint();
-      }
-
-      if (daDebug) {
-        console.log(
-          '[DA]',
-          {
-            op:
-              '0x' +
-              op.toString(16),
-
-            len:
-              buf.length,
-
-            hits:
-              hits.length,
-
-            strings:
-              daState.lastSpellStrings,
-
-            sample:
-              hits.slice(0, 5),
-          }
-        );
-      }
-    } catch (e) {
-      daState.invalidFrames++;
-
-      daState.lastErr =
-        String(
-          e && e.message
-            ? e.message
-            : e
-        ).slice(0, 60);
-
-      daSchedulePaint();
-    }
-  }
-
-  function daPersistNames() {
-    try {
-      const obj = {};
-
-      for (
-        const [k, v]
-        of daState.names
-      ) {
-        obj[k] = v;
-      }
-
-      sessionStorage.setItem(
-        'cap-da-names',
-        JSON.stringify(obj)
-      );
-
-      sessionStorage.setItem(
-        'cap-da-party',
-        JSON.stringify([
-          ...daState.partyIds,
-        ])
-      );
-    } catch (_) {}
-  }
-
-  function daLoadNames() {
-    try {
-      const n =
-        JSON.parse(
-          sessionStorage.getItem(
-            'cap-da-names'
-          ) || '{}'
-        );
-
-      for (
-        const k
-        of Object.keys(n)
-      ) {
-        const id = +k;
-
-        if (
-          daIdOk(id) &&
-          n[k]
-        ) {
-          daState.names.set(
-            id,
-            String(n[k])
-          );
-        }
-      }
-
-      const p =
-        JSON.parse(
-          sessionStorage.getItem(
-            'cap-da-party'
-          ) || '[]'
-        );
-
-      for (
-        const id
-        of p
-      ) {
-        if (
-          daIdOk(+id)
-        ) {
-          daState.partyIds.add(
-            +id
-          );
-        }
-      }
-    } catch (_) {}
-  }
-
-  function daWalkPlayers(
-    node,
-    depth
-  ) {
-    if (
-      !node ||
-      depth > 8
-    ) {
-      return;
-    }
-
-    if (
-      Array.isArray(node)
-    ) {
-      for (
-        const x
-        of node
-      ) {
-        daWalkPlayers(
-          x,
-          depth + 1
-        );
-      }
-
-      return;
-    }
-
-    if (
-      typeof node !== 'object'
-    ) {
-      return;
-    }
-
-    const id =
-      node.runtimePlayerId ??
-      node.runtime_player_id;
-
-    const name =
-      node.name ||
-      node.nickname ||
-      node.characterName ||
-      node.displayName;
-
-    if (
-      typeof id === 'number' &&
-      daIdOk(id) &&
-      typeof name === 'string'
-    ) {
-      const nm =
-        name.trim();
-
-      if (
-        nm.length >= 2 &&
-        nm.length < 32 &&
-        !/^player\s*#/i.test(nm)
-      ) {
-        daState.names.set(
-          id,
-          nm
-        );
-
-        daState.partyIds.add(
-          id
-        );
-      }
-    }
-
-    for (
-      const k
-      of Object.keys(node)
-    ) {
-      const v = node[k];
-
-      if (
-        v &&
-        typeof v === 'object'
-      ) {
-        daWalkPlayers(
-          v,
-          depth + 1
-        );
-      }
-    }
-  }
+  // =====================================================================
+  // NOMES / PARTY
+  // =====================================================================
 
   function daRememberNamesFromRx(
     text
@@ -9824,29 +10142,112 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         return;
       }
 
-      daWalkPlayers(
+      function walk(
+        node,
+        depth
+      ) {
+        if (
+          !node ||
+          depth > 8
+        ) {
+          return;
+        }
+
+        if (
+          Array.isArray(node)
+        ) {
+          for (
+            const item
+            of node
+          ) {
+            walk(
+              item,
+              depth + 1
+            );
+          }
+
+          return;
+        }
+
+        if (
+          typeof node !==
+          'object'
+        ) {
+          return;
+        }
+
+        const id =
+          node.runtimePlayerId ??
+          node.runtime_player_id;
+
+        const name =
+          node.name ||
+          node.nickname ||
+          node.characterName ||
+          node.displayName;
+
+        if (
+          typeof id === 'number' &&
+          daIdOk(id) &&
+          typeof name === 'string'
+        ) {
+          const nm =
+            name.trim();
+
+          if (
+            nm.length >= 2 &&
+            nm.length < 32 &&
+            !/^player\s*#/i.test(
+              nm
+            )
+          ) {
+            daState.names.set(
+              id,
+              nm
+            );
+
+            daState.partyIds.add(
+              id
+            );
+          }
+        }
+
+        for (
+          const key
+          of Object.keys(node)
+        ) {
+          if (
+            node[key] &&
+            typeof node[key] ===
+              'object'
+          ) {
+            walk(
+              node[key],
+              depth + 1
+            );
+          }
+        }
+      }
+
+      walk(
         msg,
         0
       );
-
-      if (
-        daState.names.size
-      ) {
-        daPersistNames();
-      }
 
       daSchedulePaint();
     } catch (_) {}
   }
 
+  // =====================================================================
+  // LISTENER DOS FRAMES
+  // =====================================================================
+
   let daBridgeInfo = {
     bv: '?',
     socket: null,
-    sg: 0,
   };
 
   function initDamageAnalyzer() {
-    daLoadNames();
     daMountPanel();
 
     try {
@@ -9854,15 +10255,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         {
           __capCombate: true,
           on: true,
-        },
-        '*'
-      );
-    } catch (_) {}
-
-    try {
-      window.postMessage(
-        {
-          __capPing: true,
         },
         '*'
       );
@@ -9885,16 +10277,21 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         const dado =
           ev.data.dado;
 
+        // ---------------------------------------------------------------
+        // FRAMES DE COMBATE
+        // ---------------------------------------------------------------
+
         if (
-          (tipo === 'combate' ||
-            tipo === 'sg') &&
+          (
+            tipo === 'combate' ||
+            tipo === 'sg'
+          ) &&
           dado
         ) {
           const opcode =
             dado.opcode;
 
           const b64 =
-            dado &&
             dado.b64 != null
               ? dado.b64
               : (
@@ -9904,93 +10301,81 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
                     : null
                 );
 
-          const combatOps = {
-            0x12: 1,
-            0x19: 1,
-            0x1a: 1,
-            0x1b: 1,
-            0x1c: 1,
-            0x1d: 1,
-            0x1e: 1,
-          };
-
           if (
-            typeof b64 === 'string'
+            typeof b64 ===
+            'string'
           ) {
             if (
-              tipo === 'combate' ||
-              combatOps[opcode]
+              tipo === 'combate'
             ) {
-              daHandleCombatFrame(
+              daHandleFrame(
                 opcode,
-                b64
+                b64,
+                'combate'
               );
-            } else {
-              daState.frames++;
-              daState.lastOp =
-                opcode;
-              daState.lastLen =
-                dado.len || 0;
-
-              daSchedulePaint();
             }
+
+            return;
           }
-        } else if (
+        }
+
+        // ---------------------------------------------------------------
+        // RX — nomes de players
+        // ---------------------------------------------------------------
+
+        if (
           tipo === 'rx' &&
           typeof dado === 'string'
         ) {
           daRememberNamesFromRx(
             dado
           );
-        } else if (
+
+          return;
+        }
+
+        // ---------------------------------------------------------------
+        // STATUS / BRIDGE
+        // ---------------------------------------------------------------
+
+        if (
+          tipo === 'status' &&
+          dado &&
+          typeof dado ===
+            'object'
+        ) {
+          daBridgeInfo.socket =
+            !!dado.conectado;
+
+          daBridgeInfo.bv =
+            dado.bv ||
+            daBridgeInfo.bv;
+
+          daSchedulePaint();
+
+          return;
+        }
+
+        if (
           tipo === 'bridge'
         ) {
           if (
             dado &&
-            typeof dado === 'object'
+            typeof dado ===
+              'object'
           ) {
-            daBridgeInfo.bv =
-              dado.bv ||
-              daBridgeInfo.bv;
+            if (
+              dado.bv
+            ) {
+              daBridgeInfo.bv =
+                dado.bv;
+            }
 
             if (
               dado.socket != null
             ) {
               daBridgeInfo.socket =
                 dado.socket;
-            }
-
-            if (
-              dado.stats
-            ) {
-              daBridgeInfo.sg =
-                dado.stats.sg ||
-                0;
-            }
-          } else if (
-            typeof dado === 'string'
-          ) {
-            daBridgeInfo.bv =
-              dado;
-          }
-
-          daSchedulePaint();
-        } else if (
-          tipo === 'status'
-        ) {
-          if (
-            dado &&
-            typeof dado === 'object' &&
-            'conectado' in dado
-          ) {
-            daBridgeInfo.socket =
-              !!dado.conectado;
-
-            if (
-              dado.bv
-            ) {
-              daBridgeInfo.bv =
-                dado.bv;
             }
           }
 
@@ -9999,13 +10384,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       }
     );
 
+    // ---------------------------------------------------------------
+    // GARANTE QUE O PAINEL VOLTE SE O DOM FOR RECONSTRUÍDO
+    // ---------------------------------------------------------------
+
     setInterval(
       () => {
         if (
           !document.getElementById(
             DA_HOST
-          ) &&
-          document.body
+          )
         ) {
           daMountPanel();
         }
@@ -10019,25 +10407,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             '*'
           );
         } catch (_) {}
-
-        try {
-          window.postMessage(
-            {
-              __capPing: true,
-            },
-            '*'
-          );
-        } catch (_) {}
       },
       3000
     );
 
     log(
-      'Damage Analyzer ativo (v' +
-      VERSION +
-      ') — entre na hunt e ataque'
+      'Damage Analyzer v2.0.0 ativo — parser real 0x1c'
     );
   }
 
-
+  // Inicializa o Analyzer
+  try {
+    initDamageAnalyzer();
+  } catch (e) {
+    console.warn(
+      '[CAP] Damage Analyzer init',
+      e
+    );
+  }
+  
 })();
