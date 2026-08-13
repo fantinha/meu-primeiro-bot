@@ -7571,6 +7571,34 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const vals = runs.map((r) => r[k]).filter((v) => typeof v === 'number' && Number.isFinite(v));
       avg[k] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     }
+    const weightedRate = (totalKey, rateKey) => {
+      const totalRuns = runs.filter((r) =>
+        typeof r[totalKey] === 'number' && Number.isFinite(r[totalKey]) &&
+        typeof r.durationSec === 'number' && Number.isFinite(r.durationSec) &&
+        r.durationSec > 0
+      );
+      if (totalRuns.length) {
+        const total = totalRuns.reduce((sum, r) => sum + r[totalKey], 0);
+        const sec = totalRuns.reduce((sum, r) => sum + r.durationSec, 0);
+        return sec > 0 ? total * 3600 / sec : null;
+      }
+
+      const rateRuns = runs.filter((r) =>
+        typeof r[rateKey] === 'number' && Number.isFinite(r[rateKey]) &&
+        typeof r.durationSec === 'number' && Number.isFinite(r.durationSec) &&
+        r.durationSec > 0
+      );
+      if (rateRuns.length) {
+        const sec = rateRuns.reduce((sum, r) => sum + r.durationSec, 0);
+        return sec > 0
+          ? rateRuns.reduce((sum, r) => sum + r[rateKey] * r.durationSec, 0) / sec
+          : null;
+      }
+      return avg[rateKey];
+    };
+    avg.xpH = weightedRate('xp', 'xpH');
+    avg.rawXpH = weightedRate('rawXp', 'rawXpH');
+    avg.balanceH = weightedRate('balance', 'balanceH');
     avg.n = runs.length;
     return avg;
   }
@@ -7621,6 +7649,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (last && (Date.now() - (last.at || 0)) < 180000) {
         const lastPoor = last.xpH == null && last.balanceH == null;
         const runRich = run.xpH != null || run.balanceH != null;
+        const closeDuration =
+          typeof last.durationSec === 'number' && Number.isFinite(last.durationSec) &&
+          typeof run.durationSec === 'number' && Number.isFinite(run.durationSec) &&
+          Math.abs(last.durationSec - run.durationSec) <= 120;
+        const sameRecentExit = closeDuration && (
+          last.reason === 'exit_leave' ||
+          last.reason === 'leaving' ||
+          last.reason === 'left' ||
+          run.reason === 'exit_leave' ||
+          run.reason === 'leaving' ||
+          run.reason === 'left'
+        );
         if (lastPoor && runRich) {
           entry.runs[0] = run;
           entry.avg = averageRuns(entry.runs);
@@ -7632,6 +7672,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             ' · Gold/h ' + fmtRate(run.balanceH) +
             ' · ' + fmtDurShort(run.durationSec)
           );
+          try { updateHuntMetricsUI(); } catch (_) {}
+          return true;
+        }
+        if (sameRecentExit) {
+          entry.runs[0] = run;
+          entry.avg = averageRuns(entry.runs);
+          cfg.huntMetrics[key] = entry;
+          saveConfig();
           try { updateHuntMetricsUI(); } catch (_) {}
           return true;
         }
