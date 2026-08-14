@@ -8239,7 +8239,61 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     };
   }
 
-  let daState = daCreateState();
+  const DA_SESSION_KEY = 'cap-da-active-hunt-v1';
+  let daPersistTimer = null;
+
+  function daSaveSession() {
+    try {
+      const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
+      const data = {
+        version: 1, elapsedMs,
+        entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
+        names: [...daState.names.entries()], partyIds: [...daState.partyIds],
+        skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
+        frames: daState.frames, parsedFrames: daState.parsedFrames, confirmedHits: daState.confirmedHits,
+        invalidFrames: daState.invalidFrames, ignoredSgFrames: daState.ignoredSgFrames,
+        lastOp: daState.lastOp, lastErr: daState.lastErr, lastLen: daState.lastLen,
+        lastSource: daState.lastSource, lastSpellStrings: daState.lastSpellStrings,
+      };
+      sessionStorage.setItem(DA_SESSION_KEY, JSON.stringify(data));
+    } catch (_) {}
+  }
+
+  function daScheduleSave() {
+    if (daPersistTimer) return;
+    daPersistTimer = setTimeout(() => { daPersistTimer = null; daSaveSession(); }, 300);
+  }
+
+  function daLoadSession() {
+    try {
+      const raw = sessionStorage.getItem(DA_SESSION_KEY);
+      if (!raw) return daCreateState();
+      const saved = JSON.parse(raw);
+      if (!saved || saved.version !== 1) return daCreateState();
+      const state = daCreateState();
+      const now = daNow();
+      const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
+      if (elapsedMs > 0) { state.startedAt = now - elapsedMs; state.updatedAt = now; }
+      for (const b of saved.entities || []) {
+        if (!daIdOk(b.id)) continue;
+        state.entities.set(b.id, { id: b.id, dealtSum: Number(b.dealtSum) || 0, takenSum: Number(b.takenSum) || 0,
+          dealtMax: Number(b.dealtMax) || 0, takenMax: Number(b.takenMax) || 0, dealtHits: Number(b.dealtHits) || 0,
+          takenHits: Number(b.takenHits) || 0, dealtWin: [], takenWin: [], dealtEl: new Map(b.dealtEl || []), takenEl: new Map(b.takenEl || []) });
+      }
+      state.names = new Map(saved.names || []);
+      state.partyIds = new Set(saved.partyIds || []);
+      for (const s of saved.skills || []) {
+        if (!s || !s.name) continue;
+        state.skills.set(String(s.name), { name: String(s.name), casts: Number(s.casts) || 0, hits: Number(s.hits) || 0,
+          damage: Number(s.damage) || 0, lastAt: 0, lastCastAt: null });
+      }
+      for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
+      log('Damage Analyzer restaurado após recarregar a página');
+      return state;
+    } catch (_) { return daCreateState(); }
+  }
+
+  let daState = daLoadSession();
 
   const DA_CAPTURE_MAX_FRAMES = 2000;
 
@@ -8493,6 +8547,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     daState.lastSource =
       source || 'parser';
 
+    daScheduleSave();
     daSchedulePaint();
 
     return true;
@@ -8732,6 +8787,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     daState.partyIds =
       partyIds;
 
+    try { sessionStorage.removeItem(DA_SESSION_KEY); } catch (_) {}
     daSchedulePaint();
   }
 
@@ -9345,6 +9401,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       skill.damage +=
         h.amount;
     }
+
+    daScheduleSave();
   }
 
   // ---------------------------------------------------------------------
@@ -10465,6 +10523,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         0
       );
 
+      daScheduleSave();
       daSchedulePaint();
     } catch (_) {}
   }

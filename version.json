@@ -1,5 +1,5 @@
 {
-  "version": "1.3.9",
-  "message": "Aviso de atualização quase imediato, compra direta de imbuements e reset automático do Damage Analyzer.",
+  "version": "1.3.10",
+  "message": "Damage Analyzer preservado ao recarregar durante a hunt e resetado apenas ao finalizar.",
   "bot": "bot.js"
 }
