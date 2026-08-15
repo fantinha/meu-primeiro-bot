@@ -1,5 +1,5 @@
 {
-  "version": "1.4.2",
-  "message": "Adiciona busca, contagem e ordenação alfabética à lista de itens protegidos.",
+  "version": "1.5.0",
+  "message": "Adiciona análise de rotação por personagem ao Damage Analyzer, com sequência, dano por cast, frequência e intervalo.",
   "bot": "bot.js"
 }

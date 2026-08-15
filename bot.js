@@ -8654,6 +8654,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       ignoredSgFrames: 0,
 
       skills: new Map(),
+      rotations: new Map(),
 
       lastOp: null,
       lastErr: null,
@@ -8674,6 +8675,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
+        rotations: [...daState.rotations.entries()].map(([id, r]) => ({
+          id, skills: [...r.skills.values()].map((s) => ({ ...s, lastCastAt: null })),
+          transitions: [...r.transitions.entries()], events: r.events.slice(-200),
+          lastSkill: r.lastSkill || '', lastCastAt: null,
+        })),
         frames: daState.frames, parsedFrames: daState.parsedFrames, confirmedHits: daState.confirmedHits,
         invalidFrames: daState.invalidFrames, ignoredSgFrames: daState.ignoredSgFrames,
         lastOp: daState.lastOp, lastErr: daState.lastErr, lastLen: daState.lastLen,
@@ -8711,6 +8717,20 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         state.skills.set(String(s.name), { name: String(s.name), casts: Number(s.casts) || 0, hits: Number(s.hits) || 0,
           damage: Number(s.damage) || 0, lastAt: 0, lastCastAt: null });
       }
+      for (const r of saved.rotations || []) {
+        const id = Number(r && r.id);
+        if (!daIdOk(id)) continue;
+        state.rotations.set(id, {
+          id,
+          skills: new Map((r.skills || []).filter((s) => s && s.name).map((s) => [String(s.name), {
+            name: String(s.name), casts: Number(s.casts) || 0, hits: Number(s.hits) || 0,
+            damage: Number(s.damage) || 0, intervalSum: Number(s.intervalSum) || 0,
+            intervalCount: Number(s.intervalCount) || 0, lastCastAt: null,
+          }])),
+          transitions: new Map(r.transitions || []), events: Array.isArray(r.events) ? r.events.slice(-200) : [],
+          lastSkill: '', lastCastAt: null,
+        });
+      }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
       log('Damage Analyzer restaurado após recarregar a página');
       return state;
@@ -8728,6 +8748,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   };
 
   let daPaintQueued = false;
+  let daRotationPlayerId = null;
   let daCollapsed =
     localStorage.getItem('cap-da-collapsed') === '1';
 
@@ -8801,6 +8822,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
 
     return s;
+  }
+
+  function daEnsureRotation(id) {
+    if (!daIdOk(id)) return null;
+    let r = daState.rotations.get(id);
+    if (!r) {
+      r = { id, skills: new Map(), transitions: new Map(), events: [], lastSkill: '', lastCastAt: null };
+      daState.rotations.set(id, r);
+    }
+    return r;
   }
 
   function daPeak(win, amount, at, prevMax) {
@@ -9008,6 +9039,55 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return daDps(
       damage
     );
+  }
+
+  function daRotationHtml(rows) {
+    const available = [...daState.rotations.values()].filter((r) =>
+      [...r.skills.values()].some((s) => s.casts > 0)
+    );
+    if (!available.length) return '<div class="da-empty small">Aguardando casts suficientes para avaliar a rotação…</div>';
+    if (!available.some((r) => r.id === daRotationPlayerId)) {
+      daRotationPlayerId = (available.find((r) => daState.names.has(r.id)) || available[0]).id;
+    }
+    const rotation = available.find((r) => r.id === daRotationPlayerId) || available[0];
+    const elapsedMin = Math.max(0.01, ((daState.updatedAt || 0) - (daState.startedAt || 0)) / 60000);
+    const useful = [...rotation.skills.values()]
+      .filter((s) => s.casts > 0 && !/^auto-attack$/i.test(s.name) && !/^\//.test(s.name))
+      .sort((a, b) => (b.damage / Math.max(1, b.casts)) - (a.damage / Math.max(1, a.casts)) || b.damage - a.damage);
+    const totalCasts = useful.reduce((n, s) => n + s.casts, 0);
+    const confidence = totalCasts >= 30 ? 'alta' : totalCasts >= 12 ? 'média' : 'baixa';
+    const topNames = new Set(useful.map((s) => s.name));
+    const outgoing = new Map();
+    for (const [edge, count] of rotation.transitions) {
+      const parts = String(edge).split('\u0000');
+      if (parts.length !== 2 || !topNames.has(parts[0]) || !topNames.has(parts[1])) continue;
+      const arr = outgoing.get(parts[0]) || [];
+      arr.push({ to: parts[1], count: Number(count) || 0 });
+      outgoing.set(parts[0], arr);
+    }
+    let chain = [];
+    if (useful.length) {
+      let current = useful.slice().sort((a, b) => b.damage - a.damage)[0].name;
+      chain.push(current);
+      for (let i = 0; i < 5; i++) {
+        const next = (outgoing.get(current) || []).sort((a, b) => b.count - a.count)[0];
+        if (!next || next.count < 2) break;
+        chain.push(next.to);
+        current = next.to;
+      }
+    }
+    const buttons = available.map((r) => {
+      const name = daState.names.get(r.id) || ('Player #' + r.id);
+      return '<button type="button" class="da-rot-player' + (r.id === rotation.id ? ' on' : '') + '" data-player-id="' + r.id + '">' + name + '</button>';
+    }).join('');
+    const rowsHtml = useful.slice(0, 8).map((s, index) => {
+      const avg = s.damage / Math.max(1, s.casts);
+      const interval = s.intervalCount ? s.intervalSum / s.intervalCount / 1000 : 0;
+      return '<div class="da-rot-row"><span class="da-rot-rank">' + (index + 1) + '</span><span class="da-rot-skill" title="' + s.name + '">' + s.name + '</span><span>' + daFmt(avg) + '</span><span>' + (s.casts / elapsedMin).toFixed(1) + '</span><span>' + (interval ? interval.toFixed(1) + 's' : '—') + '</span></div>';
+    }).join('');
+    return '<div class="da-rotation"><div class="da-rot-players">' + buttons + '</div>' +
+      '<div class="da-rot-summary"><span>Sequência mais recorrente</span><b>' + (chain.length > 1 ? chain.join(' → ') : 'Amostra insuficiente') + '</b><small>Confiança ' + confidence + ' · ' + totalCasts + ' casts úteis. Sugestão baseada no dano observado; cooldown, mana e função defensiva não entram na nota.</small></div>' +
+      '<div class="da-rot-head"><span>#</span><span>Prioridade por impacto</span><span>Dano/cast</span><span>Cast/min</span><span>Intervalo</span></div>' + rowsHtml + '</div>';
   }
 
   function daElChips(
@@ -9811,6 +9891,48 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     skill.lastAt = now;
 
+    // Separa a rotação por atacante. Um mesmo frame pode conter vários hits
+    // da mesma ação; cada personagem recebe apenas um cast dentro da janela
+    // de deduplicação, mas todo o dano e todos os hits são contabilizados.
+    const byPlayer = new Map();
+    for (const h of result.dealtHits) {
+      const id = h && h.runtimePlayerId;
+      if (!daIdOk(id) || !(h.amount > 0)) continue;
+      const g = byPlayer.get(id) || { damage: 0, hits: 0 };
+      g.damage += h.amount;
+      g.hits++;
+      byPlayer.set(id, g);
+    }
+    const wallNow = Date.now();
+    for (const [id, group] of byPlayer) {
+      const rotation = daEnsureRotation(id);
+      if (!rotation) continue;
+      let rs = rotation.skills.get(skill.name);
+      if (!rs) {
+        rs = { name: skill.name, casts: 0, hits: 0, damage: 0, intervalSum: 0, intervalCount: 0, lastCastAt: null };
+        rotation.skills.set(skill.name, rs);
+      }
+      const duplicate = rs.lastCastAt != null && wallNow - rs.lastCastAt < CAST_DEDUPE_MS;
+      if (!duplicate) {
+        if (rs.lastCastAt != null) {
+          rs.intervalSum += wallNow - rs.lastCastAt;
+          rs.intervalCount++;
+        }
+        rs.casts++;
+        rs.lastCastAt = wallNow;
+        if (rotation.lastSkill && rotation.lastCastAt != null && wallNow - rotation.lastCastAt <= 10000) {
+          const edge = rotation.lastSkill + '\u0000' + skill.name;
+          rotation.transitions.set(edge, (rotation.transitions.get(edge) || 0) + 1);
+        }
+        rotation.lastSkill = skill.name;
+        rotation.lastCastAt = wallNow;
+        rotation.events.push({ at: wallNow, skill: skill.name, damage: group.damage });
+        if (rotation.events.length > 200) rotation.events.splice(0, rotation.events.length - 200);
+      }
+      rs.hits += group.hits;
+      rs.damage += group.damage;
+    }
+
     for (
       const h
       of result.dealtHits
@@ -10263,8 +10385,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           12
         );
 
+    const rotationHtml = daRotationHtml(rows);
+
     const status =
-      'v2.0.0' +
+      'v2.1.0' +
       ' · tempo ' +
       Math.floor(
         elapsed
@@ -10515,6 +10639,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       skillHtml +
       '</section>' +
 
+      '<section class="da-section">' +
+      '<div class="da-section-title">' +
+      'ROTAÇÃO POR PERSONAGEM' +
+      '</div>' +
+      rotationHtml +
+      '</section>' +
+
       '<div class="da-status">' +
       status +
       '</div>' +
@@ -10582,6 +10713,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     if (exportButton) {
       exportButton.addEventListener('click', daExportCapture);
     }
+
+    root.querySelectorAll('.da-rot-player').forEach((button) => {
+      button.addEventListener('click', () => {
+        daRotationPlayerId = Number(button.getAttribute('data-player-id'));
+        daPaint();
+      });
+    });
   }
 
   // =====================================================================
@@ -10814,6 +10952,22 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     '.da-skill-dps{' +
     'color:#a39b8c;' +
     '}' +
+
+    '.da-rotation{display:flex;flex-direction:column;gap:5px;}' +
+    '.da-rot-players{display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;}' +
+    '.da-rot-player{border:1px solid rgba(120,90,40,.3);background:rgba(20,25,26,.8);color:#8f887a;border-radius:3px;padding:3px 6px;cursor:pointer;font-size:9px;white-space:nowrap;}' +
+    '.da-rot-player.on{border-color:#a88746;color:#e0c77d;background:rgba(120,90,40,.18);}' +
+    '.da-rot-summary{display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid rgba(120,90,40,.2);background:rgba(0,0,0,.14);}' +
+    '.da-rot-summary span{color:#817b6e;font-size:8px;text-transform:uppercase;}' +
+    '.da-rot-summary b{color:#d0b96f;font-size:9px;line-height:1.35;overflow-wrap:anywhere;}' +
+    '.da-rot-summary small{color:#6f6a61;font-size:8px;line-height:1.35;}' +
+    '.da-rot-head,.da-rot-row{display:grid;grid-template-columns:16px minmax(100px,1.7fr) .8fr .65fr .65fr;gap:4px;align-items:center;}' +
+    '.da-rot-head{color:#817b6e;font-size:7px;text-transform:uppercase;}' +
+    '.da-rot-head span:not(:nth-child(2)){text-align:right;}' +
+    '.da-rot-row{padding:3px 0;border-top:1px solid rgba(120,90,40,.12);font-size:8px;color:#9d9588;font-variant-numeric:tabular-nums;}' +
+    '.da-rot-row span:not(:nth-child(2)){text-align:right;}' +
+    '.da-rot-rank{color:#6f6a61;}' +
+    '.da-rot-skill{color:#b5aa91;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
 
     '.da-empty{' +
     'text-align:center;' +
@@ -11134,7 +11288,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     );
 
     log(
-      'Damage Analyzer v2.0.0 ativo — parser real 0x1c'
+      'Damage Analyzer v2.1.0 ativo — rotação por personagem + parser real 0x1c'
     );
   }
 
