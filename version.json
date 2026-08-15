@@ -1,5 +1,5 @@
 {
-  "version": "1.3.10",
-  "message": "Damage Analyzer preservado ao recarregar durante a hunt e resetado apenas ao finalizar.",
+  "version": "1.4.0",
+  "message": "Auto Depot para guardar itens protegidos no baú escolhido antes de voltar à hunt.",
   "bot": "bot.js"
 }

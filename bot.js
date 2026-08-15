@@ -207,6 +207,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     goldTransferEvery: 1,    // fazer a auto-transferência a cada X vendas na cidade (só no modo splitter)
     autoListEnabled: false,  // Auto Listagem no Market após vender na cidade
     autoListItems: [],       // itens (dos protegidos) marcados para listar no Market
+    autoDepotEnabled: false, // guardar itens protegidos marcados no Depot após vender
+    autoDepotItems: [],      // itens protegidos marcados com o ícone de baú
+    autoDepotBox: 1,         // baú do Depot (1–20)
+    autoDepotClick: null,    // posição relativa do Depot no canvas { x, y }
     imbueKey: 'Strike',      // chave do catálogo de imbuement
     imbueTier: 'powerful',   // 'basic' | 'intricate' | 'powerful'
     imbueSets: 1,            // quantos sets comprar
@@ -254,6 +258,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     SELL_CONFIRM: 'Confirmando venda...',
     SELL_WAIT: 'Aguardando venda concluir...',
     GOLD_TRANSFER: 'Transferindo gold aos membros da party...',
+    AUTO_DEPOT: 'Guardando itens no Depot...',
     AUTO_LIST: 'Listando itens no Market...',
     EXPLORE: 'Abrindo Jogar > Explorar...',
     PICK_HUNT: 'Procurando a hunt...',
@@ -783,6 +788,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     cfg.protectedItems = cfg.protectedItems || [];
     if (cfg.protectedItems.includes(name)) {
       cfg.protectedItems = cfg.protectedItems.filter((n) => n !== name);
+      cfg.autoListItems = (cfg.autoListItems || []).filter((n) => n !== name);
+      cfg.autoDepotItems = (cfg.autoDepotItems || []).filter((n) => n !== name);
       log(`Proteção removida: ${name}`);
       microToast(`❌ "${name}" desprotegido`, false);
     } else {
@@ -798,6 +805,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     cfg.protectedItems = (cfg.protectedItems || []).filter((n) => n !== name);
     // Item que sai da proteção também sai da Auto Listagem (só protegidos listam).
     cfg.autoListItems = (cfg.autoListItems || []).filter((n) => n !== name);
+    cfg.autoDepotItems = (cfg.autoDepotItems || []).filter((n) => n !== name);
     saveConfig();
     renderProtectSection();
     renderProtectTab();
@@ -813,16 +821,69 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     '<path d="M26.0984 19.9592L17.3384 11.1992L14.8984 13.6392L23.6584 22.3992C24.3284 23.0692 25.4284 23.0692 26.0984 22.3992C26.7684 21.7292 26.7684 20.6292 26.0984 19.9592Z"/>' +
     '<path d="M10.66 24.8189C10.22 23.4089 8.93 22.3789 7.38 22.3789H5.12C3.57 22.3789 2.27 23.4089 1.84 24.8189C0.75 25.3989 0 26.5289 0 27.8489H12.5C12.5 26.5289 11.75 25.3989 10.66 24.8189Z"/></svg>';
 
+  const DEPOT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<path d="M3 7.2 12 3l9 4.2v11.6A2.2 2.2 0 0 1 18.8 21H5.2A2.2 2.2 0 0 1 3 18.8V7.2Zm2 2v9.6c0 .1.1.2.2.2h13.6c.1 0 .2-.1.2-.2V9.2l-7 3.2-7-3.2Zm2.2 3.2h9.6v2H7.2v-2Z"/></svg>';
+
   // Marca/desmarca um item protegido para a Auto Listagem no Market.
   function toggleAutoListItem(name) {
     cfg.autoListItems = cfg.autoListItems || [];
     const has = cfg.autoListItems.includes(name);
     if (has) cfg.autoListItems = cfg.autoListItems.filter((n) => n !== name);
-    else cfg.autoListItems.push(name);
+    else {
+      cfg.autoListItems.push(name);
+      cfg.autoDepotItems = (cfg.autoDepotItems || []).filter((n) => n !== name);
+    }
     saveConfig();
     renderProtectTab();
     log(`Auto Listagem: "${name}" ${has ? 'removido da listagem' : 'marcado para listar no Market'}`);
   }
+
+  function toggleAutoDepotItem(name) {
+    cfg.autoDepotItems = cfg.autoDepotItems || [];
+    const has = cfg.autoDepotItems.includes(name);
+    if (has) cfg.autoDepotItems = cfg.autoDepotItems.filter((n) => n !== name);
+    else {
+      cfg.autoDepotItems.push(name);
+      cfg.autoListItems = (cfg.autoListItems || []).filter((n) => n !== name);
+    }
+    saveConfig();
+    renderProtectTab();
+    log(`Auto Depot: "${name}" ${has ? 'removido' : `marcado para o Depot ${cfg.autoDepotBox || 1}`}`);
+  }
+
+  let depotCaptureMode = false;
+  function setDepotCaptureMode(on) {
+    depotCaptureMode = !!on;
+    if (ui && ui.depotCapture) {
+      ui.depotCapture.classList.toggle('on', depotCaptureMode);
+      ui.depotCapture.textContent = depotCaptureMode ? 'Clique no Depot…' : 'Definir posição';
+    }
+    if (ui && ui.depotStatus && depotCaptureMode) {
+      ui.depotStatus.style.display = '';
+      ui.depotStatus.textContent = 'Agora clique no móvel do Depot dentro do mapa.';
+    }
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!depotCaptureMode || e.button !== 0) return;
+    const canvas = e.target && e.target.closest && e.target.closest('canvas');
+    if (!canvas) return;
+    const r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    cfg.autoDepotClick = {
+      x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
+    };
+    saveConfig();
+    setDepotCaptureMode(false);
+    if (ui && ui.depotStatus) {
+      ui.depotStatus.textContent = `Posição salva · destino: Depot ${cfg.autoDepotBox || 1}`;
+    }
+    log('Auto Depot: posição do móvel capturada');
+    microToast('📦 Posição do Depot salva', true);
+    // Não bloqueia o clique: o próprio jogo também abre o Depot agora.
+  }, true);
 
   // Lista persistente na aba ITENS do painel (independente do Loot Filter).
   function renderProtectTab() {
@@ -849,6 +910,17 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           : `Clique para listar "${name}" no Market automaticamente`;
         mk.addEventListener('click', () => toggleAutoListItem(name));
         row.appendChild(mk);
+      }
+      if (cfg.autoDepotEnabled && !isPartyMember()) {
+        const dp = document.createElement('span');
+        const on = (cfg.autoDepotItems || []).includes(name);
+        dp.className = 'sah-prot-depot' + (on ? ' on' : '');
+        dp.innerHTML = DEPOT_ICON_SVG;
+        dp.title = on
+          ? `"${name}" será guardado no Depot ${cfg.autoDepotBox || 1} — clique para desmarcar`
+          : `Clique para guardar "${name}" automaticamente no Depot`;
+        dp.addEventListener('click', () => toggleAutoDepotItem(name));
+        row.appendChild(dp);
       }
       const nm = document.createElement('span');
       nm.className = 'sah-prot-name';
@@ -1009,7 +1081,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // loot era protegido): não conta como venda (sem auto-transfer), mas a Auto
   // Listagem AINDA deve rodar — pode haver itens marcados pra listar mesmo
   // sem nada vendável na Venda Rápida.
-  function afterEmptySellRouted() { return bot.sellForGold ? 'GOLD_WAIT' : maybeAutoListPhase(); }
+  function afterEmptySellRouted() { return bot.sellForGold ? 'GOLD_WAIT' : maybeAutoDepotPhase(); }
 
   // Fase logo após uma VENDA concluída com sucesso. Se o líder ligou a
   // auto-transferência de gold e já bateu a cadência (a cada X vendas), entra
@@ -1033,6 +1105,21 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         bot.goldTransferDone = false;
         return 'GOLD_TRANSFER';
       }
+    }
+    return maybeAutoDepotPhase();
+  }
+
+  function maybeAutoDepotPhase() {
+    if (cfg.autoDepotEnabled && !isPartyMember() &&
+        (cfg.autoDepotItems || []).some(itemInInventory)) {
+      if (!cfg.autoDepotClick) {
+        log('Auto Depot: posição do móvel não definida — pulando nesta volta');
+        notify('Auto Depot: use “Definir posição” na aba ITENS e clique no móvel do Depot.');
+        return maybeAutoListPhase();
+      }
+      bot.autoDepotKicked = false;
+      bot.autoDepotDone = false;
+      return 'AUTO_DEPOT';
     }
     return maybeAutoListPhase();
   }
@@ -1401,7 +1488,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       // Fail-safe: sem leitura, não faz nada. Não valem nas fases de saída/troca.
       // AUTO_LIST entra aqui só pra os gatilhos não interromperem a listagem no
       // meio (ela dura ~1 min; depois o fluxo normal segue e os gatilhos valem).
-      const exitFlowPhases = ['EXIT_LEAVE', 'EXIT_PARTY', 'GOLD_WAIT', 'TRAIN_WAIT', 'AUTO_LIST', 'TO_TRAINING', 'SWITCH_CHAR', 'CHAR_SELECT'];
+      const exitFlowPhases = ['EXIT_LEAVE', 'EXIT_PARTY', 'GOLD_WAIT', 'TRAIN_WAIT', 'AUTO_DEPOT', 'AUTO_LIST', 'TO_TRAINING', 'SWITCH_CHAR', 'CHAR_SELECT'];
       if (!exitFlowPhases.includes(bot.phase)) {
         let exit = null;
         // returnToHunt também aciona a saída (senão o char nunca sai da hunt
@@ -1478,7 +1565,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       // Durante o fluxo de saída/treino/troca de personagem, ignoramos as
       // checagens genéricas de party (confirmar prontidão / membro-espera) —
       // senão elas "sequestram" essas fases (era o conflito de loopings).
-      const inExitFlow = ['EXIT_LEAVE', 'EXIT_PARTY', 'GOLD_WAIT', 'TRAIN_WAIT', 'AUTO_LIST', 'TO_TRAINING', 'SWITCH_CHAR', 'CHAR_SELECT']
+      const inExitFlow = ['EXIT_LEAVE', 'EXIT_PARTY', 'GOLD_WAIT', 'TRAIN_WAIT', 'AUTO_DEPOT', 'AUTO_LIST', 'TO_TRAINING', 'SWITCH_CHAR', 'CHAR_SELECT']
         .includes(bot.phase);
 
       // Modal "Confirmação de Prontidão" (party): aparece para líder e
@@ -1632,13 +1719,31 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           if (bot.goldTransferDone) {
             bot.goldTransferKicked = false;
             bot.goldTransferDone = false;
-            setPhase(maybeAutoListPhase()); // depois do transfer, lista (se houver)
+            setPhase(maybeAutoDepotPhase()); // depois do transfer, guarda/lista (se houver)
           } else if (phaseAge() > 90000) {
             // trava de segurança: não fica preso aqui pra sempre
             log('Auto-transfer: tempo excedido — voltando pra hunt');
             bot.goldTransferKicked = false;
             goldTransferBusy = false;
             setPhase(afterSellPhase());
+          }
+          break;
+        }
+
+        case 'AUTO_DEPOT': {
+          if (!autoDepotBusy && !bot.autoDepotKicked) {
+            bot.autoDepotKicked = true;
+            runAutoDepotFlow(false);
+          }
+          if (bot.autoDepotDone) {
+            bot.autoDepotKicked = false;
+            bot.autoDepotDone = false;
+            setPhase(maybeAutoListPhase());
+          } else if (phaseAge() > 60000) {
+            log('Auto Depot: tempo excedido — seguindo o fluxo');
+            bot.autoDepotKicked = false;
+            autoDepotBusy = false;
+            setPhase(maybeAutoListPhase());
           }
           break;
         }
@@ -3305,6 +3410,21 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         #stonegy-auto-hunt .sah-prot-market svg { width: 13px; height: 13px; fill: #5b5a56; }
         #stonegy-auto-hunt .sah-prot-market:hover svg { fill: #c89b3c; }
         #stonegy-auto-hunt .sah-prot-market.on svg { fill: #f2c65a; }
+        #stonegy-auto-hunt .sah-prot-depot {
+          display: flex; align-items: center; cursor: pointer;
+          margin-right: 2px; flex-shrink: 0;
+        }
+        #stonegy-auto-hunt .sah-prot-depot svg { width: 14px; height: 14px; fill: #5b5a56; }
+        #stonegy-auto-hunt .sah-prot-depot:hover svg { fill: #78a9d1; }
+        #stonegy-auto-hunt .sah-prot-depot.on svg { fill: #73b7ef; }
+        #stonegy-auto-hunt .sah-depot-config {
+          display: grid; grid-template-columns: 1fr auto auto; align-items: end;
+          gap: 6px; margin: 5px 0 2px;
+        }
+        #stonegy-auto-hunt .sah-depot-config select { min-width: 64px; }
+        #stonegy-auto-hunt .sah-depot-capture.on {
+          color: #f2c65a; border-color: #c89b3c; animation: sah-lock-pulse 1s ease-in-out infinite;
+        }
       </style>
       <style id="sah-pm-style">
         /* ---- Janelas de PM flutuantes (estilo Ragnarok) ---- */
@@ -3616,6 +3736,17 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             <label for="sah-autolist-on">Auto Listagem no Market</label>
           </div>
           <div class="sah-chat-hint sah-autolist-hint" style="display:none">Com a Auto Listagem ligada, os itens protegidos ganham o ícone do <b>market</b> ao lado: <b>amarelo</b> = será listado. Após vender na cidade, o bot lista esses itens por <b>(mais barato − 1)</b> com a quantidade máxima, e volta pra hunt.</div>
+          <div class="sah-checkline">
+            <input type="checkbox" class="sah-autodepot-on" id="sah-autodepot-on">
+            <label for="sah-autodepot-on">Guardar itens no Depot</label>
+          </div>
+          <div class="sah-chat-hint sah-autodepot-hint" style="display:none">Os itens protegidos ganham um ícone de <b>baú azul</b>. Marque os que devem ser guardados, escolha o Depot e capture uma vez a posição do móvel no mapa.</div>
+          <div class="sah-depot-config" style="display:none">
+            <div><label>Depot</label><select class="sah-depot-box"></select></div>
+            <button type="button" class="sah-depot-capture" title="Clique aqui e depois clique no móvel do Depot no mapa">Definir posição</button>
+            <button type="button" class="sah-depot-now" title="Guardar agora os itens marcados">Guardar agora</button>
+          </div>
+          <div class="sah-chat-hint sah-depot-status" style="display:none"></div>
           <div class="sah-chat-hint"><b>Inventário:</b> clique no <b>🔒 cadeado</b> (ao lado da lupa) e depois no item que quer proteger.<br><b>Loot Filter:</b> clique <b>direito</b> no item para proteger/remover. Itens protegidos <b>nunca</b> são vendidos pelo bot (persistente).</div>
           <div class="sah-prot-head">
             <label>Itens protegidos</label>
@@ -3718,6 +3849,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       goldTransferRows: root.querySelectorAll('.sah-goldtransfer-row'),
       autoListOn: root.querySelector('.sah-autolist-on'),
       autoListHint: root.querySelector('.sah-autolist-hint'),
+      autoDepotOn: root.querySelector('.sah-autodepot-on'),
+      autoDepotHint: root.querySelector('.sah-autodepot-hint'),
+      depotConfig: root.querySelector('.sah-depot-config'),
+      depotBox: root.querySelector('.sah-depot-box'),
+      depotCapture: root.querySelector('.sah-depot-capture'),
+      depotNow: root.querySelector('.sah-depot-now'),
+      depotStatus: root.querySelector('.sah-depot-status'),
       imbueKey: root.querySelector('.sah-imbue-key'),
       imbueTier: root.querySelector('.sah-imbue-tier'),
       imbueSets: root.querySelector('.sah-imbue-sets'),
@@ -3803,6 +3941,25 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       updateGtModeState();
       if (ui.autoListOn) ui.autoListOn.checked = !!cfg.autoListEnabled;
       if (ui.autoListHint) ui.autoListHint.style.display = cfg.autoListEnabled ? '' : 'none';
+      if (ui.autoDepotOn) ui.autoDepotOn.checked = !!cfg.autoDepotEnabled;
+      if (ui.autoDepotHint) ui.autoDepotHint.style.display = cfg.autoDepotEnabled ? '' : 'none';
+      if (ui.depotConfig) ui.depotConfig.style.display = cfg.autoDepotEnabled ? '' : 'none';
+      if (ui.depotStatus) {
+        ui.depotStatus.style.display = cfg.autoDepotEnabled ? '' : 'none';
+        ui.depotStatus.textContent = cfg.autoDepotClick
+          ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox || 1}`
+          : 'Posição ainda não definida.';
+      }
+      if (ui.depotBox) {
+        if (!ui.depotBox.options.length) {
+          for (let n = 1; n <= 20; n++) {
+            const o = document.createElement('option');
+            o.value = String(n); o.textContent = String(n);
+            ui.depotBox.appendChild(o);
+          }
+        }
+        ui.depotBox.value = String(Math.min(20, Math.max(1, parseInt(cfg.autoDepotBox, 10) || 1)));
+      }
       // Imbuements
       if (ui.imbueKey) {
         if (!ui.imbueKey.options.length) {
@@ -4234,6 +4391,34 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         log(`Auto Listagem ${cfg.autoListEnabled ? 'ON — marque os itens (ícone do market) na lista de protegidos' : 'OFF'}`);
       });
     }
+    if (ui.autoDepotOn) {
+      ui.autoDepotOn.addEventListener('change', () => {
+        cfg.autoDepotEnabled = ui.autoDepotOn.checked;
+        saveConfig();
+        if (ui.autoDepotHint) ui.autoDepotHint.style.display = cfg.autoDepotEnabled ? '' : 'none';
+        if (ui.depotConfig) ui.depotConfig.style.display = cfg.autoDepotEnabled ? '' : 'none';
+        if (ui.depotStatus) {
+          ui.depotStatus.style.display = cfg.autoDepotEnabled ? '' : 'none';
+          ui.depotStatus.textContent = cfg.autoDepotClick
+            ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox || 1}`
+            : 'Posição ainda não definida.';
+        }
+        renderProtectTab();
+        log(`Auto Depot ${cfg.autoDepotEnabled ? 'ON — marque os itens no ícone de baú' : 'OFF'}`);
+      });
+    }
+    if (ui.depotBox) {
+      ui.depotBox.addEventListener('change', () => {
+        cfg.autoDepotBox = Math.min(20, Math.max(1, parseInt(ui.depotBox.value, 10) || 1));
+        saveConfig();
+        if (ui.depotStatus) ui.depotStatus.textContent = cfg.autoDepotClick
+          ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox}`
+          : `Destino: Depot ${cfg.autoDepotBox} · posição ainda não definida.`;
+        renderProtectTab();
+      });
+    }
+    if (ui.depotCapture) ui.depotCapture.addEventListener('click', () => setDepotCaptureMode(!depotCaptureMode));
+    if (ui.depotNow) ui.depotNow.addEventListener('click', () => runAutoDepotFlow(true));
 
     // --- Imbuements (Market) ---
     function readImbueCfgFromUI() {
@@ -4290,6 +4475,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       // vende (solo/líder). Membro não vê o toggle nem os ícones do market.
       if (ui.autoListOn) ui.autoListOn.closest('.sah-checkline').style.display = isMember ? 'none' : '';
       if (ui.autoListHint) ui.autoListHint.style.display = (!isMember && cfg.autoListEnabled) ? '' : 'none';
+      if (ui.autoDepotOn) ui.autoDepotOn.closest('.sah-checkline').style.display = isMember ? 'none' : '';
+      if (ui.autoDepotHint) ui.autoDepotHint.style.display = (!isMember && cfg.autoDepotEnabled) ? '' : 'none';
+      if (ui.depotConfig) ui.depotConfig.style.display = (!isMember && cfg.autoDepotEnabled) ? '' : 'none';
+      if (ui.depotStatus) ui.depotStatus.style.display = (!isMember && cfg.autoDepotEnabled) ? '' : 'none';
       renderProtectTab(); // ícones do market na lista acompanham o papel
 
       // Lure existe no solo e para o líder de party (não para o membro).
@@ -7199,6 +7388,169 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       (s) => (s.getAttribute('aria-label') || '').trim().toLowerCase() === want &&
              !s.closest('#stonegy-auto-hunt') && !s.closest('#sah-protect-section') && visible(s)
     );
+  }
+
+  let autoDepotBusy = false;
+
+  function depotPickerCandidateCells(root) {
+    if (!root) return [];
+    const cells = Array.from(root.querySelectorAll('button,[role="button"],div')).filter((el) => {
+      if (!visible(el)) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width < 28 || r.width > 90 || r.height < 28 || r.height > 90) return false;
+      if (Math.abs(r.width - r.height) > 18) return false;
+      return getComputedStyle(el).cursor === 'pointer' && !!el.querySelector('img,svg,span');
+    });
+    const unique = [];
+    const seen = new Set();
+    cells.forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const key = `${Math.round(r.left)}:${Math.round(r.top)}`;
+      if (!seen.has(key)) { seen.add(key); unique.push(el); }
+    });
+    return unique;
+  }
+
+  function depotPickerRoot() {
+    const title = Array.from(document.querySelectorAll('h3,h4,h5,p,span,div')).find((el) => {
+      if (!visible(el) || (el.children && el.children.length > 2)) return false;
+      return /^depot chests$/i.test((el.textContent || '').replace(/\s+/g, ' ').trim());
+    });
+    if (!title) return null;
+    for (let n = title.parentElement, i = 0; n && n !== document.body && i < 12; n = n.parentElement, i++) {
+      const slots = Array.from(n.querySelectorAll('.stonegy-item-holder-slot')).filter(visible);
+      if (slots.length >= 20) return n;
+      // O seletor do jogo pode mudar a classe dos quadrados. Aceitamos o
+      // menor ancestral que contenha os 20 botões, sem ampliar até a página
+      // inteira (o que poderia confundir outros slots da interface com baús).
+      if (depotPickerCandidateCells(n).length >= 20) return n;
+    }
+    return null;
+  }
+
+  function depotPickerCells(root) {
+    if (!root) return [];
+    let cells = Array.from(root.querySelectorAll('.stonegy-item-holder-slot')).filter(visible);
+    if (cells.length < 20) cells = depotPickerCandidateCells(root);
+    const unique = [];
+    const seen = new Set();
+    cells.forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const key = `${Math.round(r.left)}:${Math.round(r.top)}`;
+      if (!seen.has(key)) { seen.add(key); unique.push(el); }
+    });
+    return unique.sort((a, b) => {
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return Math.abs(ra.top - rb.top) > 8 ? ra.top - rb.top : ra.left - rb.left;
+    }).slice(0, 20);
+  }
+
+  function clickDepotCanvasPosition() {
+    const pos = cfg.autoDepotClick;
+    const canvas = document.querySelector('canvas');
+    if (!pos || !canvas || !visible(canvas)) return false;
+    const r = canvas.getBoundingClientRect();
+    const opts = {
+      bubbles: true, cancelable: true, view: window,
+      clientX: r.left + r.width * Math.max(0, Math.min(1, Number(pos.x) || 0)),
+      clientY: r.top + r.height * Math.max(0, Math.min(1, Number(pos.y) || 0)),
+    };
+    canvas.dispatchEvent(new PointerEvent('pointerdown', opts));
+    canvas.dispatchEvent(new MouseEvent('mousedown', opts));
+    canvas.dispatchEvent(new PointerEvent('pointerup', opts));
+    canvas.dispatchEvent(new MouseEvent('mouseup', opts));
+    canvas.dispatchEvent(new MouseEvent('click', opts));
+    return true;
+  }
+
+  function depotInventorySlots(name) {
+    const root = document.querySelector('[data-guide="character-inventory"]');
+    if (!root) return [];
+    const want = String(name || '').trim().toLowerCase();
+    return Array.from(root.querySelectorAll('.stonegy-item-holder-slot')).filter((slot) => {
+      const span = slot.querySelector('span[aria-label]');
+      return visible(slot) && span && (span.getAttribute('aria-label') || '').trim().toLowerCase() === want;
+    });
+  }
+
+  async function autoDepotFlowImpl(manual) {
+    const items = (cfg.autoDepotItems || []).filter(itemInInventory);
+    if (!items.length) {
+      log('Auto Depot: nenhum item marcado no inventário');
+      if (manual) notify('Auto Depot: nenhum item marcado está no inventário.');
+      return { ok: true, moved: 0, failed: 0 };
+    }
+    let picker = depotPickerRoot();
+    if (!picker) {
+      if (!clickDepotCanvasPosition()) {
+        notify('Auto Depot: defina a posição do móvel na aba ITENS.');
+        return { ok: false, moved: 0, failed: items.length, error: 'posição não definida' };
+      }
+      for (let t = 0; t < 14 && !picker; t++) {
+        await sleep(300);
+        picker = depotPickerRoot();
+      }
+    }
+    if (!picker) {
+      notify('Auto Depot: não consegui abrir “DEPOT CHESTS”. Confira a posição salva.');
+      return { ok: false, moved: 0, failed: items.length, error: 'seletor não abriu' };
+    }
+    const box = Math.min(20, Math.max(1, parseInt(cfg.autoDepotBox, 10) || 1));
+    const cells = depotPickerCells(picker);
+    if (cells.length < box) {
+      notify(`Auto Depot: não encontrei o Depot ${box} na janela.`);
+      return { ok: false, moved: 0, failed: items.length, error: 'baú não encontrado' };
+    }
+    log(`Auto Depot: selecionando Depot ${box}`);
+    click(cells[box - 1]);
+    let selected = false;
+    for (let t = 0; t < 12; t++) {
+      await sleep(250);
+      if (!depotPickerRoot()) { selected = true; break; }
+    }
+    if (!selected) {
+      notify(`Auto Depot: o Depot ${box} não abriu; nenhum item foi movido.`);
+      return { ok: false, moved: 0, failed: items.length, error: 'baú não abriu' };
+    }
+
+    let moved = 0;
+    let failed = 0;
+    for (const name of items) {
+      let guard = 0;
+      while (guard++ < 60) {
+        const before = depotInventorySlots(name);
+        if (!before.length) break;
+        const slot = before[0];
+        click(slot);
+        let decreased = false;
+        for (let t = 0; t < 10; t++) {
+          await sleep(180);
+          if (!document.contains(slot) || depotInventorySlots(name).length < before.length) {
+            decreased = true; moved++; break;
+          }
+        }
+        if (!decreased) {
+          failed++;
+          log(`Auto Depot: ⚠ "${name}" não saiu do inventário`);
+          break;
+        }
+      }
+    }
+    log(`Auto Depot: finalizado — ${moved} pilha(s) guardada(s), ${failed} falha(s)`);
+    notify(`📦 Auto Depot: ${moved} pilha(s) guardada(s) no Depot ${box}${failed ? ` · ${failed} falha(s)` : ''}`);
+    return { ok: failed === 0, moved, failed };
+  }
+
+  function runAutoDepotFlow(manual) {
+    if (autoDepotBusy) return;
+    autoDepotBusy = true;
+    if (!manual) bot.autoDepotDone = false;
+    autoDepotFlowImpl(!!manual)
+      .catch((e) => log('Auto Depot: erro — ' + (e && e.message ? e.message : e)))
+      .finally(() => {
+        autoDepotBusy = false;
+        if (!manual) bot.autoDepotDone = true;
+      });
   }
 
   // Fecha o modal do Market (o X do canto), pra liberar a HUD e o bot seguir.
