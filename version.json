@@ -1,5 +1,5 @@
 {
-  "version": "1.4.1",
-  "message": "Corrige o Auto Depot usando o canal WebSocket nativo do jogo, sem exigir que o personagem esteja diante do Depot.",
+  "version": "1.4.2",
+  "message": "Adiciona busca, contagem e ordenação alfabética à lista de itens protegidos.",
   "bot": "bot.js"
 }

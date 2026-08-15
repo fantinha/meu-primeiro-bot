@@ -888,10 +888,24 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // Lista persistente na aba ITENS do painel (independente do Loot Filter).
   function renderProtectTab() {
     if (!ui.protList) return;
-    const list = cfg.protectedItems || [];
+    const allItems = (cfg.protectedItems || []).slice().sort((a, b) =>
+      String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
+    );
+    const query = String(ui.protSearch && ui.protSearch.value || '').trim().toLowerCase();
+    const list = query
+      ? allItems.filter((name) => String(name).toLowerCase().includes(query))
+      : allItems;
+    if (ui.protCount) {
+      ui.protCount.textContent = query ? `${list.length}/${allItems.length}` : String(allItems.length);
+      ui.protCount.title = query ? `${list.length} item(ns) encontrado(s) de ${allItems.length}` : `${allItems.length} item(ns) protegido(s)`;
+    }
     ui.protList.innerHTML = '';
-    if (!list.length) {
+    if (!allItems.length) {
       ui.protList.innerHTML = '<div class="sah-chat-empty">Nenhum item protegido</div>';
+      return;
+    }
+    if (!list.length) {
+      ui.protList.innerHTML = '<div class="sah-chat-empty">Nenhum item encontrado</div>';
       return;
     }
     list.forEach((name) => {
@@ -3389,6 +3403,15 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           margin-top: 4px; border: 1px solid #3c3c41; border-radius: 3px;
           max-height: 200px; overflow-y: auto;
         }
+        #stonegy-auto-hunt .sah-prot-filter {
+          display: flex; align-items: center; gap: 6px; margin-top: 5px;
+        }
+        #stonegy-auto-hunt .sah-prot-search {
+          flex: 1; min-width: 0; margin: 0; padding: 6px 8px;
+        }
+        #stonegy-auto-hunt .sah-prot-count {
+          min-width: 32px; color: #8d887b; font-size: 10px; text-align: right;
+        }
         #stonegy-auto-hunt .sah-prot-row {
           display: flex; align-items: center; gap: 6px; padding: 5px 7px;
           border-bottom: 1px solid #23262b; font-size: 12px;
@@ -3750,6 +3773,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               <span>Proteger</span>
             </button>
           </div>
+          <div class="sah-prot-filter">
+            <input type="search" class="sah-prot-search" placeholder="Filtrar item pelo nome…" autocomplete="off">
+            <span class="sah-prot-count" title="Quantidade de itens protegidos">0</span>
+          </div>
           <div class="sah-prot-list"></div>
           <div class="sah-imbue-box">
             <div class="sah-prot-head"><label>Imbuements (Market)</label></div>
@@ -3890,6 +3917,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       chatConvs: root.querySelector('.sah-chat-convs'),
       protList: root.querySelector('.sah-prot-list'),
       protLock: root.querySelector('.sah-prot-lock'),
+      protSearch: root.querySelector('.sah-prot-search'),
+      protCount: root.querySelector('.sah-prot-count'),
       profCard: root.querySelector('.sah-prof-card'),
       profName: root.querySelector('.sah-prof-name'),
       profDd: root.querySelector('.sah-prof-dd'),
@@ -4447,6 +4476,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     // não vê o cadeado injetado no jogo (bug de navegador).
     if (ui.protLock) {
       ui.protLock.addEventListener('click', () => toggleLockMode());
+    }
+    if (ui.protSearch) {
+      ui.protSearch.addEventListener('input', () => renderProtectTab());
+      // Evita que atalhos do jogo sejam disparados enquanto o usuário digita.
+      ui.protSearch.addEventListener('keydown', (e) => e.stopPropagation());
     }
 
     function updateRoleVisibility() {
