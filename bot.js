@@ -857,7 +857,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     depotCaptureMode = !!on;
     if (ui && ui.depotCapture) {
       ui.depotCapture.classList.toggle('on', depotCaptureMode);
-      ui.depotCapture.textContent = depotCaptureMode ? 'Clique no Depot…' : 'Definir posição';
+      ui.depotCapture.textContent = depotCaptureMode ? 'Clique no Depot…' : 'Posição reserva';
     }
     if (ui && ui.depotStatus && depotCaptureMode) {
       ui.depotStatus.style.display = '';
@@ -878,7 +878,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     saveConfig();
     setDepotCaptureMode(false);
     if (ui && ui.depotStatus) {
-      ui.depotStatus.textContent = `Posição salva · destino: Depot ${cfg.autoDepotBox || 1}`;
+      ui.depotStatus.textContent = `WebSocket direto · Depot ${cfg.autoDepotBox || 1} · posição reserva salva`;
     }
     log('Auto Depot: posição do móvel capturada');
     microToast('📦 Posição do Depot salva', true);
@@ -1112,11 +1112,6 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   function maybeAutoDepotPhase() {
     if (cfg.autoDepotEnabled && !isPartyMember() &&
         (cfg.autoDepotItems || []).some(itemInInventory)) {
-      if (!cfg.autoDepotClick) {
-        log('Auto Depot: posição do móvel não definida — pulando nesta volta');
-        notify('Auto Depot: use “Definir posição” na aba ITENS e clique no móvel do Depot.');
-        return maybeAutoListPhase();
-      }
       bot.autoDepotKicked = false;
       bot.autoDepotDone = false;
       return 'AUTO_DEPOT';
@@ -3740,10 +3735,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             <input type="checkbox" class="sah-autodepot-on" id="sah-autodepot-on">
             <label for="sah-autodepot-on">Guardar itens no Depot</label>
           </div>
-          <div class="sah-chat-hint sah-autodepot-hint" style="display:none">Os itens protegidos ganham um ícone de <b>baú azul</b>. Marque os que devem ser guardados, escolha o Depot e capture uma vez a posição do móvel no mapa.</div>
+          <div class="sah-chat-hint sah-autodepot-hint" style="display:none">Os itens protegidos ganham um ícone de <b>baú azul</b>. Marque os que devem ser guardados e escolha o Depot. O envio usa o próprio WebSocket do jogo; a posição do móvel fica apenas como alternativa de compatibilidade.</div>
           <div class="sah-depot-config" style="display:none">
             <div><label>Depot</label><select class="sah-depot-box"></select></div>
-            <button type="button" class="sah-depot-capture" title="Clique aqui e depois clique no móvel do Depot no mapa">Definir posição</button>
+            <button type="button" class="sah-depot-capture" title="Alternativa caso uma atualização do jogo impeça o canal direto">Posição reserva</button>
             <button type="button" class="sah-depot-now" title="Guardar agora os itens marcados">Guardar agora</button>
           </div>
           <div class="sah-chat-hint sah-depot-status" style="display:none"></div>
@@ -3947,8 +3942,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (ui.depotStatus) {
         ui.depotStatus.style.display = cfg.autoDepotEnabled ? '' : 'none';
         ui.depotStatus.textContent = cfg.autoDepotClick
-          ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox || 1}`
-          : 'Posição ainda não definida.';
+          ? `WebSocket direto · Depot ${cfg.autoDepotBox || 1} · posição reserva salva`
+          : `WebSocket direto · destino: Depot ${cfg.autoDepotBox || 1}`;
       }
       if (ui.depotBox) {
         if (!ui.depotBox.options.length) {
@@ -4400,8 +4395,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         if (ui.depotStatus) {
           ui.depotStatus.style.display = cfg.autoDepotEnabled ? '' : 'none';
           ui.depotStatus.textContent = cfg.autoDepotClick
-            ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox || 1}`
-            : 'Posição ainda não definida.';
+            ? `WebSocket direto · Depot ${cfg.autoDepotBox || 1} · posição reserva salva`
+            : `WebSocket direto · destino: Depot ${cfg.autoDepotBox || 1}`;
         }
         renderProtectTab();
         log(`Auto Depot ${cfg.autoDepotEnabled ? 'ON — marque os itens no ícone de baú' : 'OFF'}`);
@@ -4412,8 +4407,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         cfg.autoDepotBox = Math.min(20, Math.max(1, parseInt(ui.depotBox.value, 10) || 1));
         saveConfig();
         if (ui.depotStatus) ui.depotStatus.textContent = cfg.autoDepotClick
-          ? `Posição do Depot salva · destino: Depot ${cfg.autoDepotBox}`
-          : `Destino: Depot ${cfg.autoDepotBox} · posição ainda não definida.`;
+          ? `WebSocket direto · Depot ${cfg.autoDepotBox} · posição reserva salva`
+          : `WebSocket direto · destino: Depot ${cfg.autoDepotBox}`;
         renderProtectTab();
       });
     }
@@ -7391,6 +7386,42 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   let autoDepotBusy = false;
+  let stonegyWebpackRequire = null;
+
+  // Obtém o runtime já carregado pelo Next/Webpack sem importar nem substituir
+  // módulos do jogo. Isso permite ativar o mesmo estado que a janela do Depot
+  // usa; o clique seguinte no inventário é quem envia `depot_move_item` pelo
+  // WebSocket nativo, já com o inventoryId correto mantido pelo React.
+  function getStonegyWebpackRequire() {
+    if (stonegyWebpackRequire) return stonegyWebpackRequire;
+    const chunks = window.webpackChunk_N_E;
+    if (!chunks || typeof chunks.push !== 'function') return null;
+    try {
+      const chunkId = 910000000 + Math.floor(Math.random() * 89999999);
+      chunks.push([[chunkId], {}, (req) => { stonegyWebpackRequire = req; }]);
+    } catch (_) {}
+    return stonegyWebpackRequire;
+  }
+
+  function setStonegyDepotBox(boxIndex) {
+    try {
+      const req = getStonegyWebpackRequire();
+      const depotState = req && req(49759);
+      if (!depotState || typeof depotState.zB !== 'function') return false;
+      depotState.zB(boxIndex);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function clearStonegyDepotBox() {
+    try {
+      const req = getStonegyWebpackRequire();
+      const depotState = req && req(49759);
+      if (depotState && typeof depotState.sG === 'function') depotState.sG();
+    } catch (_) {}
+  }
 
   function depotPickerCandidateCells(root) {
     if (!root) return [];
@@ -7480,37 +7511,37 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (manual) notify('Auto Depot: nenhum item marcado está no inventário.');
       return { ok: true, moved: 0, failed: 0 };
     }
-    let picker = depotPickerRoot();
-    if (!picker) {
-      if (!clickDepotCanvasPosition()) {
-        notify('Auto Depot: defina a posição do móvel na aba ITENS.');
-        return { ok: false, moved: 0, failed: items.length, error: 'posição não definida' };
-      }
-      for (let t = 0; t < 14 && !picker; t++) {
-        await sleep(300);
-        picker = depotPickerRoot();
-      }
-    }
-    if (!picker) {
-      notify('Auto Depot: não consegui abrir “DEPOT CHESTS”. Confira a posição salva.');
-      return { ok: false, moved: 0, failed: items.length, error: 'seletor não abriu' };
-    }
     const box = Math.min(20, Math.max(1, parseInt(cfg.autoDepotBox, 10) || 1));
-    const cells = depotPickerCells(picker);
-    if (cells.length < box) {
-      notify(`Auto Depot: não encontrei o Depot ${box} na janela.`);
-      return { ok: false, moved: 0, failed: items.length, error: 'baú não encontrado' };
-    }
-    log(`Auto Depot: selecionando Depot ${box}`);
-    click(cells[box - 1]);
-    let selected = false;
-    for (let t = 0; t < 12; t++) {
-      await sleep(250);
-      if (!depotPickerRoot()) { selected = true; break; }
-    }
-    if (!selected) {
-      notify(`Auto Depot: o Depot ${box} não abriu; nenhum item foi movido.`);
-      return { ok: false, moved: 0, failed: items.length, error: 'baú não abriu' };
+    let activatedDirectly = setStonegyDepotBox(box - 1);
+    let openedPicker = false;
+
+    // Compatibilidade caso o módulo interno mude numa atualização do jogo:
+    // abre o móvel salvo e seleciona o baú pela interface. A janela permanece
+    // aberta após a seleção — isso é o comportamento normal do Stonegy.
+    if (!activatedDirectly) {
+      let picker = depotPickerRoot();
+      if (!picker && cfg.autoDepotClick) {
+        openedPicker = clickDepotCanvasPosition();
+        for (let t = 0; t < 14 && !picker; t++) {
+          await sleep(300);
+          picker = depotPickerRoot();
+        }
+      }
+      if (!picker) {
+        notify('Auto Depot: canal direto indisponível e não consegui abrir “DEPOT CHESTS”.');
+        return { ok: false, moved: 0, failed: items.length, error: 'depot indisponível' };
+      }
+      const cells = depotPickerCells(picker);
+      if (cells.length < box) {
+        notify(`Auto Depot: não encontrei o Depot ${box} na janela.`);
+        return { ok: false, moved: 0, failed: items.length, error: 'baú não encontrado' };
+      }
+      log(`Auto Depot: selecionando Depot ${box} pela janela`);
+      click(cells[box - 1]);
+      await sleep(450); // o seletor continua aberto; apenas o estado ativo muda
+    } else {
+      log(`Auto Depot: Depot ${box} ativado pelo canal interno do jogo`);
+      await sleep(120); // permite que o hook do inventário receba o novo estado
     }
 
     let moved = 0;
@@ -7536,6 +7567,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         }
       }
     }
+    clearStonegyDepotBox();
+    if (openedPicker) {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true,
+      }));
+    }
     log(`Auto Depot: finalizado — ${moved} pilha(s) guardada(s), ${failed} falha(s)`);
     notify(`📦 Auto Depot: ${moved} pilha(s) guardada(s) no Depot ${box}${failed ? ` · ${failed} falha(s)` : ''}`);
     return { ok: failed === 0, moved, failed };
@@ -7548,6 +7585,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     autoDepotFlowImpl(!!manual)
       .catch((e) => log('Auto Depot: erro — ' + (e && e.message ? e.message : e)))
       .finally(() => {
+        clearStonegyDepotBox();
         autoDepotBusy = false;
         if (!manual) bot.autoDepotDone = true;
       });

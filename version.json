@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
-  "message": "Auto Depot para guardar itens protegidos no baú escolhido antes de voltar à hunt.",
+  "version": "1.4.1",
+  "message": "Corrige o Auto Depot usando o canal WebSocket nativo do jogo, sem exigir que o personagem esteja diante do Depot.",
   "bot": "bot.js"
 }
