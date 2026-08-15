@@ -8618,7 +8618,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   // =====================================================================
-  // DAMAGE ANALYZER (v2.0.0) — parser real 0x1c + combate sem duplicação
+  // DAMAGE ANALYZER (v2.2.0) — decoder oficial 0x1c + rotação por personagem
   // =====================================================================
 
   const DA_HOST = 'cap-damage-analyzer';
@@ -8644,6 +8644,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       updatedAt: null,
 
       names: new Map(),
+      vocations: new Map(),
       partyIds: new Set(),
 
       frames: 0,
@@ -8671,9 +8672,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 1, elapsedMs,
+        version: 2, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
-        names: [...daState.names.entries()], partyIds: [...daState.partyIds],
+        names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
         rotations: [...daState.rotations.entries()].map(([id, r]) => ({
           id, skills: [...r.skills.values()].map((s) => ({ ...s, lastCastAt: null })),
@@ -8699,7 +8700,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || saved.version !== 1) return daCreateState();
+      if (!saved || (saved.version !== 1 && saved.version !== 2)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8711,13 +8712,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           takenHits: Number(b.takenHits) || 0, dealtWin: [], takenWin: [], dealtEl: new Map(b.dealtEl || []), takenEl: new Map(b.takenEl || []) });
       }
       state.names = new Map(saved.names || []);
+      state.vocations = new Map(saved.vocations || []);
       state.partyIds = new Set(saved.partyIds || []);
       for (const s of saved.skills || []) {
         if (!s || !s.name) continue;
         state.skills.set(String(s.name), { name: String(s.name), casts: Number(s.casts) || 0, hits: Number(s.hits) || 0,
           damage: Number(s.damage) || 0, lastAt: 0, lastCastAt: null });
       }
-      for (const r of saved.rotations || []) {
+      // A versão 1 podia conter associações heurísticas incorretas. Mantemos
+      // dano/nome após F5, mas descartamos somente a rotação antiga.
+      for (const r of saved.version === 2 ? (saved.rotations || []) : []) {
         const id = Number(r && r.id);
         if (!daIdOk(id)) continue;
         state.rotations.set(id, {
@@ -9043,7 +9047,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function daRotationHtml(rows) {
     const available = [...daState.rotations.values()].filter((r) =>
-      [...r.skills.values()].some((s) => s.casts > 0)
+      [...r.skills.values()].some((s) => s.casts > 0) &&
+      (!daState.partyIds.size || daState.partyIds.has(r.id))
     );
     if (!available.length) return '<div class="da-empty small">Aguardando casts suficientes para avaliar a rotação…</div>';
     if (!available.some((r) => r.id === daRotationPlayerId)) {
@@ -9052,7 +9057,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const rotation = available.find((r) => r.id === daRotationPlayerId) || available[0];
     const elapsedMin = Math.max(0.01, ((daState.updatedAt || 0) - (daState.startedAt || 0)) / 60000);
     const useful = [...rotation.skills.values()]
-      .filter((s) => s.casts > 0 && !/^auto-attack$/i.test(s.name) && !/^\//.test(s.name))
+      // Procs/DoTs aparecem como fonte de dano, mas não são botões da rotação.
+      .filter((s) => s.casts > 0 && !/^(auto-attack|poison|enflame|zap)$/i.test(s.name) && !/^\//.test(s.name))
       .sort((a, b) => (b.damage / Math.max(1, b.casts)) - (a.damage / Math.max(1, a.casts)) || b.damage - a.damage);
     const totalCasts = useful.reduce((n, s) => n + s.casts, 0);
     const confidence = totalCasts >= 30 ? 'alta' : totalCasts >= 12 ? 'média' : 'baixa';
@@ -9078,7 +9084,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
     const buttons = available.map((r) => {
       const name = daState.names.get(r.id) || ('Player #' + r.id);
-      return '<button type="button" class="da-rot-player' + (r.id === rotation.id ? ' on' : '') + '" data-player-id="' + r.id + '">' + name + '</button>';
+      const vocation = daState.vocations.get(r.id) || '';
+      return '<button type="button" class="da-rot-player' + (r.id === rotation.id ? ' on' : '') + '" data-player-id="' + r.id + '"><b>' + name + '</b>' + (vocation ? '<small>' + vocation + '</small>' : '') + '</button>';
     }).join('');
     const rowsHtml = useful.slice(0, 8).map((s, index) => {
       const avg = s.damage / Math.max(1, s.casts);
@@ -9279,6 +9286,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const names =
       daState.names;
 
+    const vocations =
+      daState.vocations;
+
     const partyIds =
       daState.partyIds;
 
@@ -9287,6 +9297,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     daState.names =
       names;
+
+    daState.vocations =
+      vocations;
 
     daState.partyIds =
       partyIds;
@@ -9433,6 +9446,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       capturedAt: new Date().toISOString(),
       startedAt: daCapture.startedAt,
       names: [...daState.names.entries()],
+      vocations: [...daState.vocations.entries()],
       partyIds: [...daState.partyIds],
       frames: daCapture.frames,
     };
@@ -9509,6 +9523,19 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
       this.o += 2;
 
+      return v;
+    };
+
+  DaReader.prototype.u32 =
+    function () {
+      if (this.rem() < 4) throw new Error('EOF u32');
+      const v = (
+        this.b[this.o] |
+        (this.b[this.o + 1] << 8) |
+        (this.b[this.o + 2] << 16) |
+        (this.b[this.o + 3] << 24)
+      ) >>> 0;
+      this.o += 4;
       return v;
     };
 
@@ -9841,6 +9868,104 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         );
     }
 
+    return result;
+  }
+
+  // Decoder exato do opcode 0x1c (HuntDamageFeedbackCompactV2), espelhado da
+  // estrutura pública atual do cliente Stonegy. Cada dano referencia um
+  // contexto que contém sourceRuntimePlayerId + sourceAttackName; portanto não
+  // precisamos mais adivinhar atacante ou usar a primeira string do pacote.
+  function daParse1cV2(buf) {
+    const result = { skill: '', strings: [], dealtHits: [], takenHits: [], skillEvents: [] };
+    try {
+      const r = new DaReader(buf);
+      if (r.rem() < 4 || r.u8() !== 0x53 || r.u8() !== 0x47) return result;
+      r.u8();
+      if (r.u8() !== 0x1c) return result;
+
+      const stringCount = r.u8();
+      if (stringCount > 255) throw new Error('stringCount inválido');
+      for (let i = 0; i < stringCount; i++) result.strings.push(r.str());
+      const str8 = () => result.strings[r.u8()] || '';
+
+      const contextCount = r.u8();
+      const contexts = [];
+      for (let i = 0; i < contextCount; i++) {
+        const flags = r.u8();
+        const ctx = {};
+        if (flags & 1) {
+          if (flags & 2) ctx.sourceRuntimePlayerId = r.u8();
+          else ctx.sourcePlayerId = str8();
+        }
+        if (flags & 4) ctx.sourceAttackType = r.u8() === 2 ? 'auto_attack' : 'spell';
+        if (flags & 8) ctx.sourceAttackName = str8();
+        if (flags & 16) ctx.sourceAttackImagePath = str8();
+        contexts.push(ctx);
+      }
+
+      const damageCount = r.u16();
+      const eventMap = new Map();
+      for (let i = 0; i < damageCount; i++) {
+        const flags = r.u16();
+        const targetIsMonster = !!(flags & 64);
+        const element = r.u8();
+        const amount = flags & 512 ? r.u32() : r.u16();
+        r.i8(); r.i8();
+        if (flags & 256) r.u8();
+
+        let targetRuntimePlayerId = null;
+        if (flags & 128) {
+          if (targetIsMonster) r.u16();
+          else targetRuntimePlayerId = r.u8();
+        } else {
+          str8();
+        }
+        const isExp = !!(flags & 1);
+        const isHeal = !!(flags & 2);
+        const isManaShield = !!(flags & 4);
+        const isManaRestore = !!(flags & 2048);
+        if (flags & 8) {
+          if (flags & 1024) r.u32();
+          else r.u16();
+        }
+        let ctx = {};
+        if (flags & 16) {
+          const contextIndex = r.u8();
+          ctx = contexts[contextIndex] || {};
+        }
+        if (flags & 32) str8();
+
+        if (!(amount > 0) || isExp || isHeal || isManaRestore) continue;
+        const sourceId = Number(ctx.sourceRuntimePlayerId);
+        const skillName = String(
+          ctx.sourceAttackName || (ctx.sourceAttackType === 'auto_attack' ? 'Auto-Attack' : '')
+        ).trim();
+        if (daIdOk(sourceId)) {
+          const hit = { runtimePlayerId: sourceId, asDealt: true, amount, element, skill: skillName };
+          result.dealtHits.push(hit);
+          if (skillName) {
+            const key = sourceId + '\u0000' + skillName;
+            let ev = eventMap.get(key);
+            if (!ev) {
+              ev = { skill: skillName, sourceRuntimePlayerId: sourceId, dealtHits: [], takenHits: [] };
+              eventMap.set(key, ev);
+            }
+            ev.dealtHits.push(hit);
+          }
+        }
+        if (!targetIsMonster && daIdOk(Number(targetRuntimePlayerId))) {
+          result.takenHits.push({
+            runtimePlayerId: Number(targetRuntimePlayerId), asTaken: true,
+            amount, element, skill: skillName, isManaShield,
+          });
+        }
+      }
+      result.skillEvents = [...eventMap.values()];
+      result.skill = result.skillEvents[0] ? result.skillEvents[0].skill : '';
+      daState.lastSpellStrings = result.skillEvents.map((e) => e.skill).slice(0, 32);
+    } catch (e) {
+      daState.lastErr = String(e && e.message ? e.message : e).slice(0, 100);
+    }
     return result;
   }
 
@@ -10242,17 +10367,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       opcode === 0x1c
     ) {
       const parsed =
-        daParse1c(
+        daParse1cV2(
           buf
         );
 
-      if (
-        parsed.skill
-      ) {
-        daRecordSkill(
-          parsed
-        );
-      }
+      for (const skillEvent of parsed.skillEvents || []) daRecordSkill(skillEvent);
 
       if (
         parsed.dealtHits.length ||
@@ -10268,7 +10387,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       }
 
       if (
-        parsed.skill
+        (parsed.skillEvents || []).length || parsed.dealtHits.length || parsed.takenHits.length
       ) {
         daState.parsedFrames++;
         daState.lastErr =
@@ -10281,7 +10400,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
       daState.invalidFrames++;
       daState.lastErr =
-        '0x1c sem skill';
+        '0x1c sem dano identificável';
 
       daSchedulePaint();
 
@@ -10388,7 +10507,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const rotationHtml = daRotationHtml(rows);
 
     const status =
-      'v2.1.0' +
+      'v2.2.0' +
       ' · tempo ' +
       Math.floor(
         elapsed
@@ -10955,7 +11074,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     '.da-rotation{display:flex;flex-direction:column;gap:5px;}' +
     '.da-rot-players{display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;}' +
-    '.da-rot-player{border:1px solid rgba(120,90,40,.3);background:rgba(20,25,26,.8);color:#8f887a;border-radius:3px;padding:3px 6px;cursor:pointer;font-size:9px;white-space:nowrap;}' +
+    '.da-rot-player{display:flex;flex-direction:column;align-items:flex-start;border:1px solid rgba(120,90,40,.3);background:rgba(20,25,26,.8);color:#8f887a;border-radius:3px;padding:3px 6px;cursor:pointer;font-size:9px;white-space:nowrap;}' +
+    '.da-rot-player b{font-size:9px;font-weight:700;}' +
+    '.da-rot-player small{font-size:7px;color:#68645c;text-transform:uppercase;}' +
     '.da-rot-player.on{border-color:#a88746;color:#e0c77d;background:rgba(120,90,40,.18);}' +
     '.da-rot-summary{display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid rgba(120,90,40,.2);background:rgba(0,0,0,.14);}' +
     '.da-rot-summary span{color:#817b6e;font-size:8px;text-transform:uppercase;}' +
@@ -11052,6 +11173,22 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           node.nickname ||
           node.characterName ||
           node.displayName;
+
+        const vocationRaw =
+          node.vocation ??
+          node.vocationName ??
+          node.className ??
+          node.vocationId;
+
+        if (typeof id === 'number' && daIdOk(id) && vocationRaw != null) {
+          const vocationById = { 1: 'KNIGHT', 2: 'PALADIN', 3: 'SORCERER', 4: 'DRUID', 5: 'MONK' };
+          const vocation = typeof vocationRaw === 'number'
+            ? vocationById[vocationRaw]
+            : String(vocationRaw).trim().toUpperCase();
+          if (vocation && /^(KNIGHT|PALADIN|SORCERER|DRUID|MONK)$/.test(vocation)) {
+            daState.vocations.set(id, vocation);
+          }
+        }
 
         if (
           typeof id === 'number' &&
@@ -11288,7 +11425,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     );
 
     log(
-      'Damage Analyzer v2.1.0 ativo — rotação por personagem + parser real 0x1c'
+      'Damage Analyzer v2.2.0 ativo — decoder exato 0x1c + rotação por personagem'
     );
   }
 

@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
-  "message": "Adiciona análise de rotação por personagem ao Damage Analyzer, com sequência, dano por cast, frequência e intervalo.",
+  "version": "1.5.1",
+  "message": "Corrige a rotação por personagem usando o decoder exato do Stonegy e identifica a vocação de cada membro da party.",
   "bot": "bot.js"
 }
