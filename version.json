@@ -1,5 +1,5 @@
 {
-  "version": "1.5.4",
-  "message": "Corrige o contador de boxes para usar o Lure ao vivo da hunt e faz a aba Analyzer abrir sempre a partir do topo.",
+  "version": "1.5.6",
+  "message": "Lê dinamicamente a velocidade de respawn de cada hunt e impede cálculos quando o valor do jogo ainda não estiver disponível.",
   "bot": "bot.js"
 }

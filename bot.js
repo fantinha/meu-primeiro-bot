@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.0';
+  const VERSION = '1.4.2';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -8756,7 +8756,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       skills: new Map(),
       rotations: new Map(),
 
-      box: { lastKills: null, current: null, lastCompletedAt: null, turns: [] },
+      box: {
+        lastKills: null,
+        current: null,
+        lastCompletedAt: null,
+        nextStartKills: null,
+        bestKillMs: null,
+        bestTotalMs: null,
+      },
 
       lastOp: null,
       lastErr: null,
@@ -8773,7 +8780,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 4, elapsedMs,
+        version: 5, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8802,7 +8809,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3, 4].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4, 5].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8838,13 +8845,15 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         });
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
-      // v3 usava apenas o Lure salvo no perfil e podia medir uma box com alvo
-      // incorreto. Só restaura turnos a partir da v4, que lê o Lure ao vivo.
-      if (saved.version >= 4 && saved.box && typeof saved.box === 'object') {
+      // v5 separa o respawn oficial do tempo de eliminação. As versões
+      // anteriores mediam o intervalo entre golpes e não são comparáveis.
+      if (saved.version >= 5 && saved.box && typeof saved.box === 'object') {
         state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
         state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
         state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
-        state.box.turns = Array.isArray(saved.box.turns) ? saved.box.turns.slice(-30) : [];
+        state.box.nextStartKills = Number.isFinite(saved.box.nextStartKills) ? saved.box.nextStartKills : null;
+        state.box.bestKillMs = Number.isFinite(saved.box.bestKillMs) ? saved.box.bestKillMs : null;
+        state.box.bestTotalMs = Number.isFinite(saved.box.bestTotalMs) ? saved.box.bestTotalMs : null;
       }
       log('Damage Analyzer restaurado após recarregar a página');
       return state;
@@ -8964,16 +8973,34 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return (ms / 1000).toFixed(1).replace('.', ',') + 's';
   }
 
+  function daBoxRespawnMs() {
+    try {
+      const body = String(document.body && document.body.innerText || '');
+      const match = body.match(/Velocidade\s+de\s+Respawn\s*\n?\s*([\d.,]+)\s*s?/i);
+      if (match) {
+        const seconds = Number(String(match[1]).replace(',', '.'));
+        if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   function daBoxOnDamage() {
     if (!inHunt() || !daState.box || daState.box.current) return;
     const kills = daState.box.lastKills;
     if (!Number.isFinite(kills)) return;
     const now = Date.now();
+    const respawnMs = daBoxRespawnMs();
+    if (Number.isFinite(daState.box.lastCompletedAt) && !Number.isFinite(respawnMs)) return;
+    const bornAt = Number.isFinite(daState.box.lastCompletedAt) && Number.isFinite(respawnMs)
+      ? daState.box.lastCompletedAt + respawnMs
+      : now;
+    if (now < bornAt) return;
     daState.box.current = {
-      startAt: now,
-      startKills: kills,
+      startAt: bornAt,
+      startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
       target: daBoxTarget(),
-      respawnMs: Number.isFinite(daState.box.lastCompletedAt) ? Math.max(0, now - daState.box.lastCompletedAt) : null,
+      respawnMs: Number.isFinite(daState.box.lastCompletedAt) ? respawnMs : null,
     };
     daScheduleSave();
     daSchedulePaint();
@@ -8985,53 +9012,58 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const kills = metrics && metrics.kills;
     if (!Number.isFinite(kills)) return;
     daState.box.lastKills = kills;
+    if (!daState.box.current && Number.isFinite(daState.box.lastCompletedAt)) {
+      const respawnMs = daBoxRespawnMs();
+      if (!Number.isFinite(respawnMs)) { daSchedulePaint(); return; }
+      const bornAt = daState.box.lastCompletedAt + respawnMs;
+      if (Date.now() >= bornAt) {
+        daState.box.current = {
+          startAt: bornAt,
+          startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
+          target: daBoxTarget(),
+          respawnMs,
+        };
+      }
+    }
     const cur = daState.box.current;
     if (!cur) return;
     const progress = Math.max(0, kills - cur.startKills);
     if (progress < cur.target) { daSchedulePaint(); return; }
     const now = Date.now();
     const killMs = Math.max(0, now - cur.startAt);
-    const turn = {
-      number: daState.box.turns.length + 1,
-      completedAt: now,
-      kills: cur.target,
-      killMs,
-      respawnMs: cur.respawnMs,
-      totalMs: Number.isFinite(cur.respawnMs) ? cur.respawnMs + killMs : null,
-    };
-    daState.box.turns.push(turn);
-    if (daState.box.turns.length > 30) daState.box.turns.splice(0, daState.box.turns.length - 30);
+    const totalMs = Number.isFinite(cur.respawnMs) ? cur.respawnMs + killMs : null;
+    if (!Number.isFinite(daState.box.bestKillMs) || killMs < daState.box.bestKillMs) {
+      daState.box.bestKillMs = killMs;
+    }
+    if (Number.isFinite(totalMs) && (!Number.isFinite(daState.box.bestTotalMs) || totalMs < daState.box.bestTotalMs)) {
+      daState.box.bestTotalMs = totalMs;
+    }
     daState.box.current = null;
     daState.box.lastCompletedAt = now;
+    daState.box.nextStartKills = cur.startKills + cur.target;
     daScheduleSave();
     daSchedulePaint();
   }
 
   function daBoxHtml() {
-    const box = daState.box || { turns: [] };
-    const turns = Array.isArray(box.turns) ? box.turns : [];
+    const box = daState.box || {};
     const cur = box.current;
     const progress = cur && Number.isFinite(box.lastKills) ? Math.min(cur.target, Math.max(0, box.lastKills - cur.startKills)) : 0;
-    const killValues = turns.map((t) => t.killMs).filter(Number.isFinite);
-    const bestKill = killValues.length ? Math.min(...killValues) : null;
-    const totalTurns = turns.filter((t) => Number.isFinite(t.totalMs));
-    const bestTotal = totalTurns.length ? Math.min(...totalTurns.map((t) => t.totalMs)) : null;
-    const recent = turns.slice(-5).filter((t) => Number.isFinite(t.totalMs));
-    const avgTotal = recent.length ? recent.reduce((sum, t) => sum + t.totalMs, 0) / recent.length : null;
     const currentKill = cur ? Date.now() - cur.startAt : null;
     const currentTotal = cur && Number.isFinite(cur.respawnMs) ? cur.respawnMs + currentKill : null;
-    const history = turns.slice(-6).reverse().map((t) => '<div class="da-turn-row"><span>#' + t.number + '</span><span>' + daBoxFmtMs(t.killMs) + '</span><span>' + daBoxFmtMs(t.respawnMs) + '</span><b>' + daBoxFmtMs(t.totalMs) + '</b></div>').join('');
+    const officialRespawn = daBoxRespawnMs();
+    const waitingMs = !cur && Number.isFinite(box.lastCompletedAt)
+      ? Math.max(0, box.lastCompletedAt + officialRespawn - Date.now())
+      : null;
     return '<div class="da-box-grid">' +
-      '<div><small>BOX ATUAL</small><b>' + (cur ? progress + ' / ' + cur.target : 'aguardando dano') + '</b></div>' +
-      '<div><small>ELIMINAÇÃO</small><b>' + daBoxFmtMs(currentKill) + '</b></div>' +
-      '<div><small>RESPAWN</small><b>' + daBoxFmtMs(cur && cur.respawnMs) + '</b></div>' +
-      '<div><small>CICLO ATUAL</small><b>' + daBoxFmtMs(currentTotal) + '</b></div>' +
-      '<div><small>MELHOR BOX</small><b>' + daBoxFmtMs(bestKill) + '</b></div>' +
-      '<div><small>MELHOR CICLO</small><b>' + daBoxFmtMs(bestTotal) + '</b></div>' +
-      '<div><small>MÉDIA 5</small><b>' + daBoxFmtMs(avgTotal) + '</b></div>' +
-      '<div><small>CONCLUÍDAS</small><b>' + turns.length + '</b></div>' +
+      '<div><small>BOX ATUAL</small><b>' + (cur ? progress + ' / ' + cur.target : (Number.isFinite(waitingMs) && waitingMs > 0 ? 'nasce em ' + daBoxFmtMs(waitingMs) : 'aguardando')) + '</b></div>' +
+      '<div><small>RESPAWN DO JOGO</small><b>' + (Number.isFinite(officialRespawn) ? daBoxFmtMs(officialRespawn) : 'aguardando leitura') + '</b></div>' +
+      '<div><small>ELIMINAÇÃO ATUAL</small><b>' + daBoxFmtMs(currentKill) + '</b></div>' +
+      '<div><small>MELHOR ELIMINAÇÃO</small><b>' + daBoxFmtMs(box.bestKillMs) + '</b></div>' +
+      '<div><small>TOTAL ATUAL</small><b>' + daBoxFmtMs(currentTotal) + '</b></div>' +
+      '<div><small>MELHOR TOTAL</small><b>' + daBoxFmtMs(box.bestTotalMs) + '</b></div>' +
       '</div>' +
-      (history ? '<div class="da-turn-head"><span>Turno</span><span>Box</span><span>Respawn</span><span>Total</span></div>' + history : '<div class="da-empty small">O primeiro turno começa no primeiro dano da box.</div>');
+      '<div class="da-empty small">Total = respawn oficial + eliminação. Um novo recorde substitui automaticamente o anterior.</div>';
   }
 
   function daPeak(win, amount, at, prevMax) {
