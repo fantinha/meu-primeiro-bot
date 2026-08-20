@@ -1,5 +1,5 @@
 {
-  "version": "1.5.2",
-  "message": "Adiciona a aba Bosses e o piloto de entrada direta no Bakragore via WebSocket, com validação e retorno do servidor.",
+  "version": "1.5.3",
+  "message": "Move o Damage Analyzer para uma aba da extensão e adiciona contador de boxes, eliminação, respawn, ciclo, recordes e média dos turnos.",
   "bot": "bot.js"
 }

@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.3.8';
+  const VERSION = '1.3.9';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3091,7 +3091,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         #stonegy-auto-hunt .sah-tab-btn {
           flex: 1; margin: 0; padding: 7px 4px; border-radius: 0;
           background: #1a1c20; color: #9a917a; font-weight: bold;
-          font-size: 11px; letter-spacing: .03em;
+          font-size: 10px; letter-spacing: .02em;
         }
         #stonegy-auto-hunt .sah-tab-btn.active {
           background: #14161a; color: #c89b3c; box-shadow: inset 0 -2px 0 #c89b3c;
@@ -3519,6 +3519,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       <div class="sah-tabs">
         <button class="sah-tab-btn active" data-tab="hunt">HUNT</button>
         <button class="sah-tab-btn" data-tab="boss">BOSSES</button>
+        <button class="sah-tab-btn" data-tab="analyzer">ANALYZER</button>
         <button class="sah-tab-btn" data-tab="chat">CHAT</button>
         <button class="sah-tab-btn" data-tab="prot">ITENS</button>
         <button class="sah-tab-btn" data-tab="stamina">STAMINA</button>
@@ -3636,6 +3637,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             </div>
           </div>
           <div class="sah-boss-status">Pronto. A entrada deve ser solicitada enquanto o personagem estiver na cidade.</div>
+        </div>
+        <div class="sah-tab-content" data-tab-content="analyzer">
+          <div class="sah-da-container"></div>
         </div>
         <div class="sah-tab-content" data-tab-content="config">
           <div class="sah-section-title">Automação</div>
@@ -3935,6 +3939,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       tabContents: root.querySelectorAll('.sah-tab-content'),
       bossEnterBtns: root.querySelectorAll('.sah-boss-enter[data-boss-id]'),
       bossStatus: root.querySelector('.sah-boss-status'),
+      daContainer: root.querySelector('.sah-da-container'),
       posSection: root.querySelector('.sah-pos-section'),
       posToggle: root.querySelector('.sah-pos-toggle'),
       posToggleLabel: root.querySelector('.sah-pos-toggle-label'),
@@ -8749,6 +8754,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       skills: new Map(),
       rotations: new Map(),
 
+      box: { lastKills: null, current: null, lastCompletedAt: null, turns: [] },
+
       lastOp: null,
       lastErr: null,
       lastLen: 0,
@@ -8764,7 +8771,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 2, elapsedMs,
+        version: 3, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8777,6 +8784,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         invalidFrames: daState.invalidFrames, ignoredSgFrames: daState.ignoredSgFrames,
         lastOp: daState.lastOp, lastErr: daState.lastErr, lastLen: daState.lastLen,
         lastSource: daState.lastSource, lastSpellStrings: daState.lastSpellStrings,
+        box: daState.box,
       };
       sessionStorage.setItem(DA_SESSION_KEY, JSON.stringify(data));
     } catch (_) {}
@@ -8792,7 +8800,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || (saved.version !== 1 && saved.version !== 2)) return daCreateState();
+      if (!saved || ![1, 2, 3].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8813,7 +8821,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       }
       // A versão 1 podia conter associações heurísticas incorretas. Mantemos
       // dano/nome após F5, mas descartamos somente a rotação antiga.
-      for (const r of saved.version === 2 ? (saved.rotations || []) : []) {
+      for (const r of saved.version >= 2 ? (saved.rotations || []) : []) {
         const id = Number(r && r.id);
         if (!daIdOk(id)) continue;
         state.rotations.set(id, {
@@ -8828,6 +8836,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         });
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
+      if (saved.version >= 3 && saved.box && typeof saved.box === 'object') {
+        state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
+        state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
+        state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
+        state.box.turns = Array.isArray(saved.box.turns) ? saved.box.turns.slice(-30) : [];
+      }
       log('Damage Analyzer restaurado após recarregar a página');
       return state;
     } catch (_) { return daCreateState(); }
@@ -8928,6 +8942,86 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       daState.rotations.set(id, r);
     }
     return r;
+  }
+
+  function daBoxTarget() {
+    const configured = Number(cfg && cfg.lure);
+    return Number.isFinite(configured) && configured > 0 ? Math.max(1, Math.round(configured)) : 8;
+  }
+
+  function daBoxFmtMs(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '—';
+    return (ms / 1000).toFixed(1).replace('.', ',') + 's';
+  }
+
+  function daBoxOnDamage() {
+    if (!inHunt() || !daState.box || daState.box.current) return;
+    const kills = daState.box.lastKills;
+    if (!Number.isFinite(kills)) return;
+    const now = Date.now();
+    daState.box.current = {
+      startAt: now,
+      startKills: kills,
+      target: daBoxTarget(),
+      respawnMs: Number.isFinite(daState.box.lastCompletedAt) ? Math.max(0, now - daState.box.lastCompletedAt) : null,
+    };
+    daScheduleSave();
+    daSchedulePaint();
+  }
+
+  function daBoxPoll() {
+    if (!daState.box || !inHunt()) return;
+    const metrics = scrapeHuntMetricsFromDom();
+    const kills = metrics && metrics.kills;
+    if (!Number.isFinite(kills)) return;
+    daState.box.lastKills = kills;
+    const cur = daState.box.current;
+    if (!cur) return;
+    const progress = Math.max(0, kills - cur.startKills);
+    if (progress < cur.target) { daSchedulePaint(); return; }
+    const now = Date.now();
+    const killMs = Math.max(0, now - cur.startAt);
+    const turn = {
+      number: daState.box.turns.length + 1,
+      completedAt: now,
+      kills: cur.target,
+      killMs,
+      respawnMs: cur.respawnMs,
+      totalMs: Number.isFinite(cur.respawnMs) ? cur.respawnMs + killMs : null,
+    };
+    daState.box.turns.push(turn);
+    if (daState.box.turns.length > 30) daState.box.turns.splice(0, daState.box.turns.length - 30);
+    daState.box.current = null;
+    daState.box.lastCompletedAt = now;
+    daScheduleSave();
+    daSchedulePaint();
+  }
+
+  function daBoxHtml() {
+    const box = daState.box || { turns: [] };
+    const turns = Array.isArray(box.turns) ? box.turns : [];
+    const cur = box.current;
+    const progress = cur && Number.isFinite(box.lastKills) ? Math.min(cur.target, Math.max(0, box.lastKills - cur.startKills)) : 0;
+    const killValues = turns.map((t) => t.killMs).filter(Number.isFinite);
+    const bestKill = killValues.length ? Math.min(...killValues) : null;
+    const totalTurns = turns.filter((t) => Number.isFinite(t.totalMs));
+    const bestTotal = totalTurns.length ? Math.min(...totalTurns.map((t) => t.totalMs)) : null;
+    const recent = turns.slice(-5).filter((t) => Number.isFinite(t.totalMs));
+    const avgTotal = recent.length ? recent.reduce((sum, t) => sum + t.totalMs, 0) / recent.length : null;
+    const currentKill = cur ? Date.now() - cur.startAt : null;
+    const currentTotal = cur && Number.isFinite(cur.respawnMs) ? cur.respawnMs + currentKill : null;
+    const history = turns.slice(-6).reverse().map((t) => '<div class="da-turn-row"><span>#' + t.number + '</span><span>' + daBoxFmtMs(t.killMs) + '</span><span>' + daBoxFmtMs(t.respawnMs) + '</span><b>' + daBoxFmtMs(t.totalMs) + '</b></div>').join('');
+    return '<div class="da-box-grid">' +
+      '<div><small>BOX ATUAL</small><b>' + (cur ? progress + ' / ' + cur.target : 'aguardando dano') + '</b></div>' +
+      '<div><small>ELIMINAÇÃO</small><b>' + daBoxFmtMs(currentKill) + '</b></div>' +
+      '<div><small>RESPAWN</small><b>' + daBoxFmtMs(cur && cur.respawnMs) + '</b></div>' +
+      '<div><small>CICLO ATUAL</small><b>' + daBoxFmtMs(currentTotal) + '</b></div>' +
+      '<div><small>MELHOR BOX</small><b>' + daBoxFmtMs(bestKill) + '</b></div>' +
+      '<div><small>MELHOR CICLO</small><b>' + daBoxFmtMs(bestTotal) + '</b></div>' +
+      '<div><small>MÉDIA 5</small><b>' + daBoxFmtMs(avgTotal) + '</b></div>' +
+      '<div><small>CONCLUÍDAS</small><b>' + turns.length + '</b></div>' +
+      '</div>' +
+      (history ? '<div class="da-turn-head"><span>Turno</span><span>Box</span><span>Respawn</span><span>Total</span></div>' + history : '<div class="da-empty small">O primeiro turno começa no primeiro dano da box.</div>');
   }
 
   function daPeak(win, amount, at, prevMax) {
@@ -9435,13 +9529,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     host.id =
       DA_HOST;
 
-    host.style.cssText =
-      'position:fixed;' +
-      'right:12px;' +
-      'bottom:12px;' +
-      'width:390px;' +
-      'max-width:50vw;' +
-      'z-index:99998;';
+    host.style.cssText = 'display:block;width:100%;';
 
     const shadow =
       host.attachShadow({
@@ -9472,12 +9560,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       root
     );
 
-    (
-      document.body ||
-      document.documentElement
-    ).appendChild(
-      host
-    );
+    const container = ui && ui.daContainer;
+    if (!container) return;
+    container.appendChild(host);
 
     daPaint();
   }
@@ -10121,6 +10206,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       byPlayer.set(id, g);
     }
     const wallNow = Date.now();
+    if (byPlayer.size > 0) daBoxOnDamage();
     for (const [id, group] of byPlayer) {
       const rotation = daEnsureRotation(id);
       if (!rotation) continue;
@@ -10597,6 +10683,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         );
 
     const rotationHtml = daRotationHtml(rows);
+    const boxHtml = daBoxHtml();
 
     const status =
       'v2.2.0' +
@@ -10837,6 +10924,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       '<div class="da-body">' +
 
       '<section class="da-section">' +
+      '<div class="da-section-title">TURNOS E BOXES</div>' +
+      boxHtml +
+      '</section>' +
+
+      '<section class="da-section">' +
       '<div class="da-section-title">' +
       'DANO POR PLAYER' +
       '</div>' +
@@ -11020,6 +11112,16 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     'border-bottom:1px solid rgba(120,90,40,.25);' +
     'padding-bottom:3px;' +
     '}' +
+
+    '.da-box-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;}' +
+    '.da-box-grid>div{display:flex;flex-direction:column;gap:2px;padding:5px;background:rgba(0,0,0,.18);border:1px solid rgba(120,90,40,.18);}' +
+    '.da-box-grid small{font-size:7px;color:#777269;text-transform:uppercase;}' +
+    '.da-box-grid b{font-size:10px;color:#d0b96f;font-variant-numeric:tabular-nums;white-space:nowrap;}' +
+    '.da-turn-head,.da-turn-row{display:grid;grid-template-columns:.65fr 1fr 1fr 1fr;gap:5px;align-items:center;font-size:8px;font-variant-numeric:tabular-nums;}' +
+    '.da-turn-head{color:#777269;text-transform:uppercase;padding-top:3px;}' +
+    '.da-turn-row{padding:3px 0;border-top:1px solid rgba(120,90,40,.12);color:#9d9588;}' +
+    '.da-turn-head span:not(:first-child),.da-turn-row span:not(:first-child),.da-turn-row b{text-align:right;}' +
+    '.da-turn-row b{color:#c89b3c;}' +
 
     '.da-list{' +
     'display:flex;' +
@@ -11354,6 +11456,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     daInitialized = true;
 
     daMountPanel();
+
+    setInterval(daBoxPoll, 500);
 
     try {
       window.postMessage(
