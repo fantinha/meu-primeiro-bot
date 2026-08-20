@@ -1,5 +1,5 @@
 {
-  "version": "1.5.3",
-  "message": "Move o Damage Analyzer para uma aba da extensão e adiciona contador de boxes, eliminação, respawn, ciclo, recordes e média dos turnos.",
+  "version": "1.5.4",
+  "message": "Corrige o contador de boxes para usar o Lure ao vivo da hunt e faz a aba Analyzer abrir sempre a partir do topo.",
   "bot": "bot.js"
 }

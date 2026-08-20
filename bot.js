@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.3.9';
+  const VERSION = '1.4.0';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -4608,6 +4608,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           c.classList.toggle('active', c.dataset.tabContent === tab)
         );
         posTabActive = tab === 'hunt';
+        const panelBody = root.querySelector('.sah-body');
+        if (panelBody) panelBody.scrollTop = 0;
         if (posTabActive) renderPositionGrid();
       });
     });
@@ -8771,7 +8773,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 3, elapsedMs,
+        version: 4, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8800,7 +8802,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8836,7 +8838,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         });
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
-      if (saved.version >= 3 && saved.box && typeof saved.box === 'object') {
+      // v3 usava apenas o Lure salvo no perfil e podia medir uma box com alvo
+      // incorreto. Só restaura turnos a partir da v4, que lê o Lure ao vivo.
+      if (saved.version >= 4 && saved.box && typeof saved.box === 'object') {
         state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
         state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
         state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
@@ -8945,6 +8949,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   }
 
   function daBoxTarget() {
+    try {
+      const body = String(document.body && document.body.innerText || '');
+      const live = body.match(/(?:^|\n)\s*LURE\s*:?\s*\n?\s*(\d{1,2})(?:\s|$)/i);
+      const liveValue = live ? Number(live[1]) : NaN;
+      if (Number.isFinite(liveValue) && liveValue > 0) return Math.max(1, Math.round(liveValue));
+    } catch (_) {}
     const configured = Number(cfg && cfg.lure);
     return Number.isFinite(configured) && configured > 0 ? Math.max(1, Math.round(configured)) : 8;
   }
