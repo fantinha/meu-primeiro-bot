@@ -1,5 +1,5 @@
 {
-  "version": "1.5.1",
-  "message": "Corrige a rotação por personagem usando o decoder exato do Stonegy e identifica a vocação de cada membro da party.",
+  "version": "1.5.2",
+  "message": "Adiciona a aba Bosses e o piloto de entrada direta no Bakragore via WebSocket, com validação e retorno do servidor.",
   "bot": "bot.js"
 }

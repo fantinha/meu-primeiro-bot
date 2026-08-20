@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.3.7';
+  const VERSION = '1.3.8';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3098,6 +3098,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         }
         #stonegy-auto-hunt .sah-tab-content { display: none; }
         #stonegy-auto-hunt .sah-tab-content.active { display: block; }
+        #stonegy-auto-hunt .sah-boss-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+        #stonegy-auto-hunt .sah-boss-card {
+          padding:10px; background:#0c0d10; border:1px solid #3c3c41; border-radius:4px;
+        }
+        #stonegy-auto-hunt .sah-boss-name { color:#f2c65a; font-size:12px; font-weight:800; }
+        #stonegy-auto-hunt .sah-boss-meta { min-height:28px; margin:4px 0 8px; color:#8a8474; font-size:10px; line-height:1.35; }
+        #stonegy-auto-hunt .sah-boss-enter { margin:0; padding:7px 5px; background:#3a2f14; color:#f2c65a; border:1px solid #c89b3c; }
+        #stonegy-auto-hunt .sah-boss-enter:disabled { opacity:.45; cursor:not-allowed; border-color:#555; background:#24262b; color:#888; }
+        #stonegy-auto-hunt .sah-boss-status { margin-top:10px; padding:8px; background:#0a141c; border:1px solid #1e3a4a; border-radius:4px; color:#9a917a; font-size:10.5px; line-height:1.4; }
+        #stonegy-auto-hunt .sah-boss-status.ok { border-color:#2f6f3f; color:#7bd68f; }
+        #stonegy-auto-hunt .sah-boss-status.warn { border-color:#8b6a27; color:#e0b45f; }
+        #stonegy-auto-hunt .sah-boss-status.err { border-color:#7a2020; color:#e06c6c; }
         #stonegy-auto-hunt .sah-imbue-box { margin-top: 12px; padding-top: 10px; border-top: 1px solid #1e3a4a; }
         #stonegy-auto-hunt .sah-imbue-box label { display:block; font-size:11px; color:#7d92a0; margin: 6px 0 3px; }
         #stonegy-auto-hunt .sah-imbue-box select,
@@ -3506,6 +3518,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       </div>
       <div class="sah-tabs">
         <button class="sah-tab-btn active" data-tab="hunt">HUNT</button>
+        <button class="sah-tab-btn" data-tab="boss">BOSSES</button>
         <button class="sah-tab-btn" data-tab="chat">CHAT</button>
         <button class="sah-tab-btn" data-tab="prot">ITENS</button>
         <button class="sah-tab-btn" data-tab="stamina">STAMINA</button>
@@ -3606,6 +3619,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           </div>
           <div class="sah-status">Parado</div>
           <div class="sah-log"></div>
+        </div>
+        <div class="sah-tab-content" data-tab-content="boss">
+          <div class="sah-section-title">Entrada direta via WebSocket</div>
+          <div class="sah-chat-hint">Envia o mesmo comando usado pelo jogo. A entrada só acontece se o servidor autorizar o personagem, o boss e a conta.</div>
+          <div class="sah-boss-grid">
+            <div class="sah-boss-card">
+              <div class="sah-boss-name">Bakragore</div>
+              <div class="sah-boss-meta">Nemesis · level recomendado 600<br>Boss ID 18 confirmado no jogo.</div>
+              <button type="button" class="sah-boss-enter" data-boss-id="18" data-boss-name="Bakragore">Entrar</button>
+            </div>
+            <div class="sah-boss-card">
+              <div class="sah-boss-name">Magma Bubble</div>
+              <div class="sah-boss-meta">Ainda não consta no catálogo WebSocket desta versão.</div>
+              <button type="button" class="sah-boss-enter" disabled title="O jogo ainda não publicou um bossId para este boss">Aguardando ID</button>
+            </div>
+          </div>
+          <div class="sah-boss-status">Pronto. A entrada deve ser solicitada enquanto o personagem estiver na cidade.</div>
         </div>
         <div class="sah-tab-content" data-tab-content="config">
           <div class="sah-section-title">Automação</div>
@@ -3903,6 +3933,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       min: root.querySelector('.sah-min'),
       tabBtns: root.querySelectorAll('.sah-tab-btn'),
       tabContents: root.querySelectorAll('.sah-tab-content'),
+      bossEnterBtns: root.querySelectorAll('.sah-boss-enter[data-boss-id]'),
+      bossStatus: root.querySelector('.sah-boss-status'),
       posSection: root.querySelector('.sah-pos-section'),
       posToggle: root.querySelector('.sah-pos-toggle'),
       posToggleLabel: root.querySelector('.sah-pos-toggle-label'),
@@ -4572,6 +4604,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         );
         posTabActive = tab === 'hunt';
         if (posTabActive) renderPositionGrid();
+      });
+    });
+
+    ui.bossEnterBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const bossId = Number(btn.dataset.bossId);
+        const bossName = String(btn.dataset.bossName || 'Boss');
+        requestBossEntry(bossId, bossName);
       });
     });
 
@@ -8279,6 +8319,45 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
   }
 
+  function setBossStatus(message, kind) {
+    if (!ui || !ui.bossStatus) return;
+    ui.bossStatus.textContent = message;
+    ui.bossStatus.classList.remove('ok', 'warn', 'err');
+    if (kind) ui.bossStatus.classList.add(kind);
+  }
+
+  function requestBossEntry(bossId, bossName) {
+    if (!Number.isInteger(bossId) || bossId <= 0) {
+      setBossStatus('Boss sem ID válido. A solicitação não foi enviada.', 'err');
+      return false;
+    }
+    if (inHunt()) {
+      setBossStatus('Finalize a hunt atual antes de entrar em ' + bossName + '.', 'warn');
+      return false;
+    }
+    if (!inCity()) {
+      setBossStatus('Aguarde o personagem chegar à cidade antes de solicitar a entrada.', 'warn');
+      return false;
+    }
+    bot.pendingBossEntry = { bossId: bossId, bossName: bossName, sentAt: Date.now() };
+    setBossStatus('Solicitando entrada em ' + bossName + ' ao servidor…', 'warn');
+    log('Boss WS: solicitando entrada em "' + bossName + '" (ID ' + bossId + ')');
+    capWsSend('start_boss_fight', { bossId: bossId });
+    setTimeout(() => {
+      const p = bot.pendingBossEntry;
+      if (!p || p.bossId !== bossId) return;
+      const body = String(document.body && document.body.innerText || '');
+      if (/Boss\s*Time|Sair\s+do\s+Boss|Finalizar\s+Boss/i.test(body)) {
+        setBossStatus('Entrada em ' + bossName + ' confirmada.', 'ok');
+        bot.pendingBossEntry = null;
+      } else {
+        setBossStatus('O servidor não confirmou a entrada em ' + bossName + '. Verifique disponibilidade, cooldown, level e mensagens do jogo.', 'err');
+        bot.pendingBossEntry = null;
+      }
+    }, 10000);
+    return true;
+  }
+
   function normalizeHuntKey(name) {
     return String(name || '')
       .toLowerCase()
@@ -8560,6 +8639,19 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (!msg || !msg.type) return;
       const t = msg.type;
       const d = msg.data || {};
+      if (bot.pendingBossEntry) {
+        const pending = bot.pendingBossEntry;
+        const typeText = String(t || '').toLowerCase();
+        const detailText = JSON.stringify(d || {}).toLowerCase();
+        if (/boss.*(?:start|bootstrap|fight_started)|(?:start|bootstrap).*boss/.test(typeText)) {
+          setBossStatus('Entrada em ' + pending.bossName + ' confirmada pelo servidor.', 'ok');
+          bot.pendingBossEntry = null;
+        } else if (/error|reject|denied|invalid|conflict/.test(typeText) && /boss|hunt/.test(typeText + ' ' + detailText)) {
+          const reason = d.message || d.error || d.reason || 'solicitação recusada';
+          setBossStatus('Entrada em ' + pending.bossName + ' recusada: ' + reason, 'err');
+          bot.pendingBossEntry = null;
+        }
+      }
       if (t === 'update_battle_config') {
         bot.liveBattle = d && typeof d === 'object' ? d : bot.liveBattle;
         updatePresetUI();
