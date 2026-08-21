@@ -1,5 +1,5 @@
 {
-  "version": "1.9.0",
-  "message": "Automação do Bestiário: rotas automáticas ou manuais, fila persistente por personagem e avanço seguro após concluir todos os monstros da hunt.",
+  "version": "1.9.1",
+  "message": "Correção das rotas do Bestiário: seletor dedicado para a hunt inicial e remoção da entrada inválida Beginner Hunt.",
   "bot": "bot.js"
 }

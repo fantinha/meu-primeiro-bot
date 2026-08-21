@@ -231,6 +231,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     bestiaryRoute: {
       mode: 'auto',       // auto | from | manual
       includeHard: false, // automático: incluir acima do nível recomendado
+      startKey: '',       // hunt inicial do modo "a partir da selecionada"
       queue: [],
       currentIndex: 0,
       active: false,
@@ -2908,7 +2909,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.7.0';
+  const VERSION = '1.7.1';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3194,6 +3195,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           display:flex; align-items:center; gap:4px; color:#9b927c; font-size:8.5px; white-space:nowrap;
         }
         #stonegy-auto-hunt .sah-best-route-safe input { width:auto; margin:0; }
+        #stonegy-auto-hunt .sah-best-route-from { grid-column:1 / -1; min-width:0; }
         #stonegy-auto-hunt .sah-best-route-actions { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; margin-top:6px; }
         #stonegy-auto-hunt .sah-best-route-actions button { margin:0; padding:5px 4px; font-size:9px; }
         #stonegy-auto-hunt .sah-best-route-add { background:#263748; color:#b9d7ea; border:1px solid #41647b; }
@@ -3821,6 +3823,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               <label class="sah-best-route-safe" title="Por padrão o automático usa somente hunts até o nível recomendado do personagem">
                 <input type="checkbox" class="sah-best-route-hard"> incluir difíceis
               </label>
+              <select class="sah-best-route-from" title="Escolha a primeira hunt da rota"></select>
             </div>
             <div class="sah-best-route-actions">
               <button type="button" class="sah-best-route-add">+ Adicionar</button>
@@ -4153,6 +4156,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       bestiaryRefresh: root.querySelector('.sah-best-refresh'),
       bestiaryRouteMode: root.querySelector('.sah-best-route-mode'),
       bestiaryRouteHard: root.querySelector('.sah-best-route-hard'),
+      bestiaryRouteFrom: root.querySelector('.sah-best-route-from'),
       bestiaryRouteAdd: root.querySelector('.sah-best-route-add'),
       bestiaryRouteStart: root.querySelector('.sah-best-route-start'),
       bestiaryRoutePause: root.querySelector('.sah-best-route-pause'),
@@ -4845,6 +4849,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     if (ui.bestiaryHunt) {
       ui.bestiaryHunt.addEventListener('change', () => {
         bestiarySelectedKey = ui.bestiaryHunt.value || '';
+        const route = bestiaryRouteCfg();
+        if (!route.active && route.mode === 'from') {
+          route.startKey = bestiarySelectedKey;
+          saveConfig();
+        }
         renderBestiaryTab();
       });
     }
@@ -4859,6 +4868,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const route = bestiaryRouteCfg();
       if (route.active) return;
       route.mode = ui.bestiaryRouteMode.value;
+      if (route.mode === 'from') route.startKey = bestiarySelectedKey || route.startKey;
       route.queue = [];
       route.currentIndex = 0;
       route.startedAt = 0;
@@ -4866,6 +4876,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       route.stopAfterCity = false;
       saveConfig();
       renderBestiaryRoute();
+    });
+    if (ui.bestiaryRouteFrom) ui.bestiaryRouteFrom.addEventListener('change', () => {
+      const route = bestiaryRouteCfg();
+      if (route.active) return;
+      route.startKey = ui.bestiaryRouteFrom.value || '';
+      route.queue = [];
+      route.currentIndex = 0;
+      route.startedAt = 0;
+      route.finishedAt = 0;
+      bestiarySelectedKey = route.startKey;
+      saveConfig();
+      renderBestiaryTab();
     });
     if (ui.bestiaryRouteHard) ui.bestiaryRouteHard.addEventListener('change', () => {
       const route = bestiaryRouteCfg();
@@ -8651,6 +8673,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       .trim();
   }
 
+  function isInvalidBestiaryHunt(hunt) {
+    if (!hunt) return true;
+    const saved = hunt.saved && typeof hunt.saved === 'object' ? hunt.saved : hunt;
+    const id = Number(saved.id != null ? saved.id : hunt.id);
+    const name = saved.title || saved.name || hunt.title || hunt.name || hunt.key || '';
+    return id === 78 || normalizeHuntKey(name) === 'beginner hunt';
+  }
+
   function normalizeVoc(v) {
     const s = String(v || '').toLowerCase();
     if (/knight|ek\b|elite knight/.test(s)) return 'Knight';
@@ -8802,8 +8832,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     let changed = false;
     const now = Date.now();
 
+    // A entrada 78 é um marcador interno do tutorial do jogo, não uma hunt
+    // jogável. Remove também cópias que versões anteriores tenham persistido.
+    for (const [key, value] of Object.entries(catalog)) {
+      if (isInvalidBestiaryHunt({ key, saved: value })) {
+        delete catalog[key];
+        changed = true;
+      }
+    }
+
     for (const hunt of snapshot.hunts) {
       if (!hunt || !hunt.title || !Array.isArray(hunt.monsters)) continue;
+      if (isInvalidBestiaryHunt(hunt)) continue;
       const huntKey = normalizeHuntKey(hunt.title);
       const oldHunt = catalog[huntKey] && typeof catalog[huntKey] === 'object' ? catalog[huntKey] : {};
       const oldMonsters = oldHunt.monsters && typeof oldHunt.monsters === 'object' ? oldHunt.monsters : {};
@@ -8926,7 +8966,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const route = cfg.bestiaryRoute;
     route.mode = ['auto', 'from', 'manual'].includes(route.mode) ? route.mode : 'auto';
     route.includeHard = !!route.includeHard;
-    route.queue = Array.isArray(route.queue) ? route.queue.filter(Boolean) : [];
+    route.startKey = normalizeHuntKey(route.startKey || '');
+    route.queue = Array.isArray(route.queue)
+      ? route.queue.filter((item) => item && !isInvalidBestiaryHunt(item))
+      : [];
+    if (!route.queue.length) route.active = false;
     route.currentIndex = Math.max(0, parseInt(route.currentIndex, 10) || 0);
     route.active = !!route.active;
     route.stopAfterCity = !!route.stopAfterCity;
@@ -8937,7 +8981,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function bestiaryRouteIsActive() {
     const route = bestiaryRouteCfg();
-    return route.active && route.queue.length > 0 && route.currentIndex < route.queue.length;
+    // Continua "ativa" durante o pós-hunt mesmo quando o índice acabou. Isso
+    // permite que afterSellPhase() chame PrepareNext, detecte o fim da fila e
+    // pare o bot na cidade em vez de voltar à última hunt.
+    return route.active && route.queue.length > 0;
   }
 
   function bestiaryRouteShouldStopAtCity() {
@@ -8961,11 +9008,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function bestiaryRouteBuildAutomatic(mode) {
     let hunts = bestiaryKnownHunts();
+    const route = bestiaryRouteCfg();
     if (mode === 'from') {
-      const startIndex = hunts.findIndex((hunt) => hunt.key === bestiarySelectedKey);
+      const startKey = route.startKey || bestiarySelectedKey;
+      const startIndex = hunts.findIndex((hunt) => hunt.key === startKey);
       if (startIndex >= 0) hunts = hunts.slice(startIndex);
     }
-    const route = bestiaryRouteCfg();
     const level = Math.max(0, Number(cfg.bestiaryCharacterLevel) || 0);
     return hunts.filter((hunt) => {
       const state = bestiaryHuntState(hunt);
@@ -9243,6 +9291,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const saved = bestiaryStore();
     for (const [key, value] of Object.entries(saved)) {
       if (!value || typeof value !== 'object') continue;
+      if (isInvalidBestiaryHunt({ key, saved: value })) continue;
       out.set(key, {
         key,
         name: String(value.name || key),
@@ -9258,6 +9307,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         const name = String(raw || '').trim();
         if (!name) continue;
         const key = normalizeHuntKey(name);
+        if (isInvalidBestiaryHunt({ key, name })) continue;
         if (!out.has(key)) out.set(key, { key, name, monsters: {}, saved: null });
       }
     }
@@ -9299,6 +9349,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const label = ui.bestiaryRouteHard.closest('label');
       if (label) label.style.display = route.mode === 'manual' ? 'none' : '';
     }
+    if (ui.bestiaryRouteFrom) {
+      const hunts = bestiaryKnownHunts().filter((hunt) => !isInvalidBestiaryHunt(hunt));
+      const previous = route.startKey || bestiarySelectedKey;
+      ui.bestiaryRouteFrom.innerHTML = '';
+      for (const hunt of hunts) {
+        const option = document.createElement('option');
+        option.value = hunt.key;
+        option.textContent = (bestiaryHuntState(hunt).complete ? '✓ ' : '') + hunt.name;
+        ui.bestiaryRouteFrom.appendChild(option);
+      }
+      route.startKey = hunts.some((hunt) => hunt.key === previous)
+        ? previous
+        : (hunts[0] ? hunts[0].key : '');
+      ui.bestiaryRouteFrom.value = route.startKey;
+      ui.bestiaryRouteFrom.disabled = route.active;
+      ui.bestiaryRouteFrom.style.display = route.mode === 'from' ? '' : 'none';
+    }
     if (ui.bestiaryRouteAdd) {
       ui.bestiaryRouteAdd.style.display = route.mode === 'manual' ? '' : 'none';
       ui.bestiaryRouteAdd.disabled = route.active;
@@ -9317,7 +9384,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       if (!route.queue.length) {
         const modeHint = route.mode === 'manual'
           ? 'Selecione uma hunt e clique em + Adicionar.'
-          : 'A fila será montada ao iniciar, usando apenas hunts incompletas e liberadas.';
+          : (route.mode === 'from'
+              ? 'Escolha acima a hunt inicial. A rota seguirá dali para a direita.'
+              : 'A fila será montada ao iniciar, usando apenas hunts incompletas e liberadas.');
         ui.bestiaryRouteMeta.textContent = modeHint;
       } else if (route.finishedAt && route.currentIndex >= route.queue.length) {
         ui.bestiaryRouteMeta.textContent = 'Rota concluída · ' + route.queue.length + ' hunts processadas.';
