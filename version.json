@@ -1,5 +1,5 @@
 {
-  "version": "1.9.3",
-  "message": "Escolha manual do lure nas rotas do Bestiário, com configuração independente do lure salvo na aba HUNT.",
+  "version": "1.9.4",
+  "message": "Rotas do Bestiário agora permitem escolher entre o lure máximo de cada hunt e um lure manual mais seguro, sem alterar a aba HUNT.",
   "bot": "bot.js"
 }

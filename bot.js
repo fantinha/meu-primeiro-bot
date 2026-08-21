@@ -231,6 +231,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     bestiaryRoute: {
       mode: 'auto',       // auto | from | manual
       includeHard: false, // automático: incluir acima do nível recomendado
+      lureMode: 'max',    // max | manual — independente do lure da aba HUNT
       lure: null,         // escolha manual exclusiva das rotas do Bestiário
       startKey: '',       // hunt inicial do modo "a partir da selecionada"
       queue: [],
@@ -2706,6 +2707,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           ? savedBestiaryRoute.queue.map((item) => ({ ...item }))
           : [],
       };
+      // Migração da 1.9.3: preserva quem já havia escolhido um lure manual.
+      // Perfis sem escolha anterior passam a usar o máximo, o novo padrão.
+      if (!['max', 'manual'].includes(savedBestiaryRoute.lureMode)) {
+        merged.bestiaryRoute.lureMode = Number(savedBestiaryRoute.lure) > 0 ? 'manual' : 'max';
+      }
       return merged;
     } catch {
       return {
@@ -2910,7 +2916,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.7.3';
+  const VERSION = '1.7.4';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3203,6 +3209,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           margin-top:6px; padding:5px 6px; background:#0c0d10; border-radius:3px;
           display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:9.5px;
         }
+        #stonegy-auto-hunt .sah-best-route-lure-mode { width:100%; margin-top:6px; }
         #stonegy-auto-hunt .sah-best-route-lure b { color:#b070ff; }
         #stonegy-auto-hunt .sah-best-route-lure-clear {
           width:auto; margin:0; padding:3px 7px; font-size:9px; background:#7a2020; color:#fff;
@@ -3822,7 +3829,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               <button type="button" class="sah-best-sync">Sincronizar</button>
             </div>
           </div>
-          <div class="sah-best-hint">A lista vem do catálogo oficial já carregado pelo jogo. O progresso é lido diretamente do Bestiary do personagem ativo. O lure da rota é escolhido por você e não altera o lure salvo na aba HUNT.</div>
+          <div class="sah-best-hint">A lista vem do catálogo oficial já carregado pelo jogo. O progresso é lido diretamente do Bestiary do personagem ativo. O lure da rota é independente do lure salvo na aba HUNT.</div>
           <div class="sah-best-route">
             <div class="sah-best-route-top">
               <select class="sah-best-route-mode" title="Modo da rota">
@@ -3835,6 +3842,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               </label>
               <select class="sah-best-route-from" title="Escolha a primeira hunt da rota"></select>
             </div>
+            <select class="sah-best-route-lure-mode" title="Escolha como o lure será definido nas rotas do Bestiário">
+              <option value="max">Lure máximo de cada hunt — mais rápido</option>
+              <option value="manual">Lure escolhido por mim — mais seguro</option>
+            </select>
             <div class="sah-best-route-lure">
               <span>Lure da rota: <b class="sah-best-route-lure-val">nenhum</b></span>
               <button type="button" class="sah-best-route-lure-clear" style="display:none">Limpar</button>
@@ -4172,8 +4183,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       bestiaryRouteMode: root.querySelector('.sah-best-route-mode'),
       bestiaryRouteHard: root.querySelector('.sah-best-route-hard'),
       bestiaryRouteFrom: root.querySelector('.sah-best-route-from'),
+      bestiaryRouteLureMode: root.querySelector('.sah-best-route-lure-mode'),
+      bestiaryRouteLureBox: root.querySelector('.sah-best-route-lure'),
       bestiaryRouteLureVal: root.querySelector('.sah-best-route-lure-val'),
       bestiaryRouteLureClear: root.querySelector('.sah-best-route-lure-clear'),
+      bestiaryRouteLureHint: root.querySelector('.sah-best-route-lure-hint'),
       bestiaryRouteAdd: root.querySelector('.sah-best-route-add'),
       bestiaryRouteStart: root.querySelector('.sah-best-route-start'),
       bestiaryRoutePause: root.querySelector('.sah-best-route-pause'),
@@ -4915,6 +4929,19 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       route.finishedAt = 0;
       saveConfig();
       renderBestiaryRoute();
+    });
+    if (ui.bestiaryRouteLureMode) ui.bestiaryRouteLureMode.addEventListener('change', () => {
+      const route = bestiaryRouteCfg();
+      route.lureMode = ui.bestiaryRouteLureMode.value === 'manual' ? 'manual' : 'max';
+      bot.bestiaryLureUnavailable = false;
+      bot.lureAppliedHunt = false;
+      bot.lureAttempts = 0;
+      saveConfig();
+      renderBestiaryRoute();
+      updateLurePulse();
+      log(route.lureMode === 'max'
+        ? 'Bestiário: lure máximo de cada hunt ativado'
+        : 'Bestiário: lure manual ativado — escolha o valor no jogo');
     });
     if (ui.bestiaryRouteLureClear) ui.bestiaryRouteLureClear.addEventListener('click', () => {
       const route = bestiaryRouteCfg();
@@ -6071,8 +6098,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         if (!opts.length) return;
         const opt = opts.find((o) => o.row.contains(e.target));
         if (!opt) return;
-        if (bestiaryRouteIsActive() && bestiaryRouteCurrentItem()) saveBestiaryRouteLure(opt.value);
-        else saveLure(opt.value);
+        if (bestiaryRouteIsActive() && bestiaryRouteCurrentItem()) {
+          if (bestiaryRouteCfg().lureMode === 'manual') saveBestiaryRouteLure(opt.value);
+          return; // no modo máximo, um clique na rota nunca altera a aba HUNT
+        }
+        saveLure(opt.value);
       },
       true
     );
@@ -6304,19 +6334,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const item = route.active ? route.queue[route.currentIndex] : null;
     if (!item) return null;
     const hunt = bestiaryStore()[item.key];
-    const selectedLure = Number(route.lure) || 0;
-    if (selectedLure <= 0) return null;
+    const huntName = (hunt && hunt.name) || item.name;
     const detected = normalizeHuntKey(detectCurrentHuntName());
     if (detected && detected !== item.key) return null;
-    return { value: selectedLure, source: 'bestiary', huntName: (hunt && hunt.name) || item.name };
+    if (route.lureMode === 'max') {
+      return { value: Number(hunt && hunt.maxLure) || 0, source: 'bestiary', mode: 'max', huntName };
+    }
+    const selectedLure = Number(route.lure) || 0;
+    if (selectedLure <= 0) return null;
+    return { value: selectedLure, source: 'bestiary', mode: 'manual', huntName };
   }
 
   function effectiveLurePlan() {
     const route = bestiaryRouteCfg();
     const routePlan = bestiaryRouteLurePlan();
     if (routePlan) return routePlan;
-    // Com uma rota ativa, nunca cai no lure da aba HUNT. Sem escolha própria,
-    // aguarda o jogador selecionar uma opção no jogo como no modo HUNT.
+    // Com uma rota ativa, nunca cai no lure da aba HUNT. No modo manual sem
+    // escolha própria, aguarda o jogador selecionar uma opção no jogo.
     if (route.active && route.queue[route.currentIndex]) return null;
     const saved = Number(cfg.lure) || 0;
     return saved > 0 ? { value: saved, source: 'hunt', huntName: '' } : null;
@@ -6324,7 +6358,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function chooseLureOption(options, plan) {
     if (!Array.isArray(options) || !options.length || !plan) return null;
-    return options.find((option) => option.value === plan.value) || null;
+    const exact = options.find((option) => option.value === plan.value);
+    if (exact || plan.mode !== 'max') return exact || null;
+    const ordered = [...options].filter((option) => Number.isFinite(Number(option.value)))
+      .sort((a, b) => Number(b.value) - Number(a.value));
+    // Respeita o máximo oficial quando disponível. Se o catálogo ainda não o
+    // informou, usa a maior opção realmente oferecida pelo jogo nesta hunt.
+    return ordered.find((option) => !plan.value || Number(option.value) <= plan.value) || ordered[0] || null;
   }
 
   // ------------------------------------------------------------------
@@ -6375,7 +6415,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         }
         if (plan.source === 'bestiary') {
           bot.bestiaryLureUnavailable = false;
-          log(`Lure do Bestiário aplicado: máx ${opt.value} em ${plan.huntName} ✔`);
+          log(`Lure do Bestiário aplicado: máx ${opt.value} em ${plan.huntName}${plan.mode === 'max' ? ' (máximo)' : ''} ✔`);
         } else {
           bot.lureUnavailable = false;
           log(`Lure salvo (máx ${plan.value}) aplicado ✔`);
@@ -6383,7 +6423,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       } else {
         if (plan.source === 'bestiary') {
           bot.bestiaryLureUnavailable = true;
-          notify(`O Lure do Bestiário salvo (máx ${plan.value}) não existe em ${plan.huntName}. Mantendo o padrão — escolha outro valor no botão que está piscando.`);
+          notify(plan.mode === 'max'
+            ? `Não encontrei uma opção de Lure válida em ${plan.huntName}. Mantendo o padrão desta hunt.`
+            : `O Lure do Bestiário salvo (máx ${plan.value}) não existe em ${plan.huntName}. Mantendo o padrão — escolha outro valor no botão que está piscando.`);
         } else {
           bot.lureUnavailable = true;
           notify(`A opção de Lure salva (máx ${plan.value}) não existe nesta hunt. Mantendo o padrão — defina um novo Lure (o botão está piscando em roxo).`);
@@ -9063,6 +9105,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const route = cfg.bestiaryRoute;
     route.mode = ['auto', 'from', 'manual'].includes(route.mode) ? route.mode : 'auto';
     route.includeHard = !!route.includeHard;
+    route.lureMode = route.lureMode === 'manual' ? 'manual' : 'max';
     route.lure = Number(route.lure) > 0 ? Number(route.lure) : null;
     route.startKey = normalizeHuntKey(route.startKey || '');
     route.queue = Array.isArray(route.queue)
@@ -9475,8 +9518,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
     if (ui.bestiaryRoutePause) ui.bestiaryRoutePause.disabled = !route.active;
     if (ui.bestiaryRouteClear) ui.bestiaryRouteClear.disabled = route.active || !route.queue.length;
+    if (ui.bestiaryRouteLureMode) ui.bestiaryRouteLureMode.value = route.lureMode;
+    if (ui.bestiaryRouteLureBox) ui.bestiaryRouteLureBox.style.display = route.lureMode === 'manual' ? '' : 'none';
     if (ui.bestiaryRouteLureVal) ui.bestiaryRouteLureVal.textContent = route.lure ? 'máx ' + route.lure : 'nenhum';
-    if (ui.bestiaryRouteLureClear) ui.bestiaryRouteLureClear.style.display = route.lure ? '' : 'none';
+    if (ui.bestiaryRouteLureClear) ui.bestiaryRouteLureClear.style.display = route.lureMode === 'manual' && route.lure ? '' : 'none';
+    if (ui.bestiaryRouteLureHint) ui.bestiaryRouteLureHint.textContent = route.lureMode === 'max'
+      ? 'Usa automaticamente o maior lure permitido em cada hunt.'
+      : 'Inicie a rota e selecione o lure no jogo uma vez; ele será repetido nas próximas hunts.';
 
     const current = route.queue[route.currentIndex] || null;
     const next = route.queue[route.currentIndex + 1] || null;
@@ -9495,7 +9543,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           (route.active ? 'ATIVA' : 'PAUSADA') + ' · ' +
           (current ? 'Atual: ' + current.name : 'Sem hunt atual') +
           (next ? ' · Próxima: ' + next.name : '') +
-          (route.lure ? ' · Lure escolhido: máx ' + route.lure : ' · Lure aguardando escolha') +
+          (route.lureMode === 'max'
+            ? ' · Lure máximo automático'
+            : (route.lure ? ' · Lure escolhido: máx ' + route.lure : ' · Lure aguardando escolha')) +
           ' · ' + Math.min(route.currentIndex + 1, route.queue.length) + '/' + route.queue.length;
       }
     }
