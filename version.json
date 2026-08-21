@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
-  "message": "Bestiário por hunt aprimorado: carrega todas as hunts e monstros oficiais e sincroniza automaticamente mortes, pendências e conclusão sem precisar entrar nas hunts.",
+  "version": "1.9.0",
+  "message": "Automação do Bestiário: rotas automáticas ou manuais, fila persistente por personagem e avanço seguro após concluir todos os monstros da hunt.",
   "bot": "bot.js"
 }
