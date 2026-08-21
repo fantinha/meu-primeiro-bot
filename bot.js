@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.3';
+  const VERSION = '1.4.4';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -8780,7 +8780,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 6, elapsedMs,
+        version: 7, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8809,7 +8809,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3, 4, 5, 6].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4, 5, 6, 7].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8845,9 +8845,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         });
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
-      // v6 lê Lure/respawn diretamente nos controles visuais do jogo. O v5
-      // podia salvar tempos incorretos porque esses rótulos não ficam no innerText.
-      if (saved.version >= 6 && saved.box && typeof saved.box === 'object') {
+      // v7 confirma o fim da BOX pela ausência de dano e usa o total real de
+      // mortes como base seguinte. Tempos anteriores podem terminar cedo.
+      if (saved.version >= 7 && saved.box && typeof saved.box === 'object') {
         state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
         state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
         state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
@@ -8989,11 +8989,22 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return null;
   }
 
+  // O painel de Kills do jogo pode atualizar depois da morte. Após alcançar o
+  // Lure, esperamos apenas esta curta janela sem dano para confirmar que não
+  // restou criatura. O tempo medido termina no último golpe, não após a espera.
+  const DA_BOX_END_QUIET_MS = 2200;
+
   function daBoxOnDamage() {
-    if (!inHunt() || !daState.box || daState.box.current) return;
+    if (!inHunt() || !daState.box) return;
+    const now = Date.now();
+    if (daState.box.current) {
+      daState.box.current.lastDamageAt = now;
+      daScheduleSave();
+      daSchedulePaint();
+      return;
+    }
     const kills = daState.box.lastKills;
     if (!Number.isFinite(kills)) return;
-    const now = Date.now();
     const respawnMs = daBoxRespawnMs();
     if (Number.isFinite(daState.box.lastCompletedAt) && !Number.isFinite(respawnMs)) return;
     const bornAt = Number.isFinite(daState.box.lastCompletedAt) && Number.isFinite(respawnMs)
@@ -9005,6 +9016,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
       target: daBoxTarget(),
       respawnMs: Number.isFinite(daState.box.lastCompletedAt) ? respawnMs : null,
+      lastDamageAt: now,
     };
     daScheduleSave();
     daSchedulePaint();
@@ -9026,6 +9038,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
           target: daBoxTarget(),
           respawnMs,
+          lastDamageAt: null,
         };
       }
     }
@@ -9034,7 +9047,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const progress = Math.max(0, kills - cur.startKills);
     if (progress < cur.target) { daSchedulePaint(); return; }
     const now = Date.now();
-    const killMs = Math.max(0, now - cur.startAt);
+    if (!Number.isFinite(cur.targetReachedAt)) cur.targetReachedAt = now;
+    const activityAt = Math.max(cur.targetReachedAt, Number(cur.lastDamageAt) || 0);
+    if (now - activityAt < DA_BOX_END_QUIET_MS) { daSchedulePaint(); return; }
+    const completedAt = activityAt;
+    const killMs = Math.max(0, completedAt - cur.startAt);
     const totalMs = Number.isFinite(cur.respawnMs) ? cur.respawnMs + killMs : null;
     if (!Number.isFinite(daState.box.bestKillMs) || killMs < daState.box.bestKillMs) {
       daState.box.bestKillMs = killMs;
@@ -9043,8 +9060,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       daState.box.bestTotalMs = totalMs;
     }
     daState.box.current = null;
-    daState.box.lastCompletedAt = now;
-    daState.box.nextStartKills = cur.startKills + cur.target;
+    daState.box.lastCompletedAt = completedAt;
+    // Usa o total efetivamente observado. Se a BOX tiver mais criaturas que o
+    // Lure previsto, a diferença não antecipa o encerramento da próxima BOX.
+    daState.box.nextStartKills = kills;
     daScheduleSave();
     daSchedulePaint();
   }
@@ -9053,7 +9072,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const box = daState.box || {};
     const cur = box.current;
     const progress = cur && Number.isFinite(box.lastKills) ? Math.min(cur.target, Math.max(0, box.lastKills - cur.startKills)) : 0;
-    const currentKill = cur ? Date.now() - cur.startAt : null;
+    const currentEndAt = cur && Number.isFinite(cur.targetReachedAt)
+      ? Math.max(cur.targetReachedAt, Number(cur.lastDamageAt) || 0)
+      : Date.now();
+    const currentKill = cur ? Math.max(0, currentEndAt - cur.startAt) : null;
     const currentTotal = cur && Number.isFinite(cur.respawnMs) ? cur.respawnMs + currentKill : null;
     const officialRespawn = daBoxRespawnMs();
     const waitingMs = !cur && Number.isFinite(box.lastCompletedAt) && Number.isFinite(officialRespawn)
@@ -11503,7 +11525,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     daMountPanel();
 
-    setInterval(daBoxPoll, 500);
+    setInterval(daBoxPoll, 200);
 
     try {
       window.postMessage(

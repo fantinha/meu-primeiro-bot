@@ -1,5 +1,5 @@
 {
-  "version": "1.5.7",
-  "message": "Corrige a leitura do Lure e da velocidade de respawn diretamente nos controles do jogo e reinicia medições inválidas da versão anterior.",
+  "version": "1.5.8",
+  "message": "Melhora a detecção do fim da BOX, impede o respawn de começar enquanto ainda há dano e elimina o atraso do tempo registrado.",
   "bot": "bot.js"
 }
