@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.2';
+  const VERSION = '1.4.3';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -8780,7 +8780,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 5, elapsedMs,
+        version: 6, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8809,7 +8809,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3, 4, 5].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4, 5, 6].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8845,9 +8845,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         });
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
-      // v5 separa o respawn oficial do tempo de eliminação. As versões
-      // anteriores mediam o intervalo entre golpes e não são comparáveis.
-      if (saved.version >= 5 && saved.box && typeof saved.box === 'object') {
+      // v6 lê Lure/respawn diretamente nos controles visuais do jogo. O v5
+      // podia salvar tempos incorretos porque esses rótulos não ficam no innerText.
+      if (saved.version >= 6 && saved.box && typeof saved.box === 'object') {
         state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
         state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
         state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
@@ -8959,9 +8959,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function daBoxTarget() {
     try {
-      const body = String(document.body && document.body.innerText || '');
-      const live = body.match(/(?:^|\n)\s*LURE\s*:?\s*\n?\s*(\d{1,2})(?:\s|$)/i);
-      const liveValue = live ? Number(live[1]) : NaN;
+      const lureButton = findLureButton();
+      const valueNode = lureButton && (lureButton.querySelector('h5') || lureButton);
+      const live = String(valueNode && valueNode.textContent || '').match(/\d{1,2}/);
+      const liveValue = live ? Number(live[0]) : NaN;
       if (Number.isFinite(liveValue) && liveValue > 0) return Math.max(1, Math.round(liveValue));
     } catch (_) {}
     const configured = Number(cfg && cfg.lure);
@@ -8975,10 +8976,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function daBoxRespawnMs() {
     try {
-      const body = String(document.body && document.body.innerText || '');
-      const match = body.match(/Velocidade\s+de\s+Respawn\s*\n?\s*([\d.,]+)\s*s?/i);
+      const icon =
+        document.querySelector('img[alt="Velocidade de Respawn"]') ||
+        document.querySelector('img[src*="/respawn.png"]');
+      const holder = icon && (icon.closest('[data-guide="hunt-lure-pace-orb"]') || icon.parentElement);
+      const match = String(holder && holder.innerText || '').match(/[\d]+(?:[.,]\d+)?/);
       if (match) {
-        const seconds = Number(String(match[1]).replace(',', '.'));
+        const seconds = Number(String(match[0]).replace(',', '.'));
         if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
       }
     } catch (_) {}
@@ -9052,7 +9056,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const currentKill = cur ? Date.now() - cur.startAt : null;
     const currentTotal = cur && Number.isFinite(cur.respawnMs) ? cur.respawnMs + currentKill : null;
     const officialRespawn = daBoxRespawnMs();
-    const waitingMs = !cur && Number.isFinite(box.lastCompletedAt)
+    const waitingMs = !cur && Number.isFinite(box.lastCompletedAt) && Number.isFinite(officialRespawn)
       ? Math.max(0, box.lastCompletedAt + officialRespawn - Date.now())
       : null;
     return '<div class="da-box-grid">' +

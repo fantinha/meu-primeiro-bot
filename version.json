@@ -1,5 +1,5 @@
 {
-  "version": "1.5.6",
-  "message": "Lê dinamicamente a velocidade de respawn de cada hunt e impede cálculos quando o valor do jogo ainda não estiver disponível.",
+  "version": "1.5.7",
+  "message": "Corrige a leitura do Lure e da velocidade de respawn diretamente nos controles do jogo e reinicia medições inválidas da versão anterior.",
   "bot": "bot.js"
 }
