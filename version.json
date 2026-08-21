@@ -1,5 +1,5 @@
 {
-  "version": "1.6.1",
-  "message": "Corrige os nomes no contador de turnos usando diretamente os contadores de monstros exibidos pelo Hunt Analyzer do jogo.",
+  "version": "1.6.2",
+  "message": "Impede que mortes antigas troquem de criatura quando o jogo reutiliza IDs, mantendo nomes e estatísticas de turnos estáveis.",
   "bot": "bot.js"
 }

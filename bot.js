@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.7';
+  const VERSION = '1.4.8';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -9198,7 +9198,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     }
     const groups = new Map();
     for (const mob of completed) {
-      const name = daState.monsterNames.get(mob.id) || mob.name || ('Criatura #' + mob.id);
+      // O nome gravado no momento da morte é imutável. O servidor reutiliza
+      // runtime IDs em criaturas futuras; consultar primeiro o mapa atual fazia
+      // uma morte antiga trocar de categoria durante a própria hunt.
+      const name = mob.name || daState.monsterNames.get(mob.id) || ('Criatura #' + mob.id);
       const row = groups.get(name) || { name, count: 0, turns: 0, worst: 0, damage: 0 };
       row.count++;
       row.turns += Number(mob.turns) || 0;
