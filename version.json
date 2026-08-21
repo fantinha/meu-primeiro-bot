@@ -1,5 +1,5 @@
 {
-  "version": "1.9.2",
-  "message": "Lure inteligente nas rotas do Bestiário: usa o máximo oficial de cada hunt sem alterar a configuração salva na aba HUNT.",
+  "version": "1.9.3",
+  "message": "Escolha manual do lure nas rotas do Bestiário, com configuração independente do lure salvo na aba HUNT.",
   "bot": "bot.js"
 }
