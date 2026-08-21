@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.5';
+  const VERSION = '1.4.7';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -8760,6 +8760,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         active: new Map(),
         completed: [],
         lastKills: null,
+        monsterKills: new Map(),
       },
 
       box: {
@@ -8786,7 +8787,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 8, elapsedMs,
+        version: 10, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8800,6 +8801,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           active: [...daState.monsterTurns.active.entries()],
           completed: daState.monsterTurns.completed.slice(-500),
           lastKills: daState.monsterTurns.lastKills,
+          monsterKills: [...daState.monsterTurns.monsterKills.entries()],
         },
         frames: daState.frames, parsedFrames: daState.parsedFrames, confirmedHits: daState.confirmedHits,
         invalidFrames: daState.invalidFrames, ignoredSgFrames: daState.ignoredSgFrames,
@@ -8821,7 +8823,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3, 4, 5, 6, 7, 8].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8856,17 +8858,20 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           lastSkill: '', lastCastAt: null,
         });
       }
-      if (saved.version >= 8) {
+      // v10 associa as mortes ao contador nominal exibido pelo próprio jogo.
+      // Descarta os vínculos antigos, que podiam ficar como "Criatura #ID".
+      if (saved.version >= 10) {
         state.monsterNames = new Map(saved.monsterNames || []);
         const mt = saved.monsterTurns || {};
         state.monsterTurns.active = new Map(mt.active || []);
         state.monsterTurns.completed = Array.isArray(mt.completed) ? mt.completed.slice(-500) : [];
         state.monsterTurns.lastKills = Number.isFinite(mt.lastKills) ? mt.lastKills : null;
+        state.monsterTurns.monsterKills = new Map(mt.monsterKills || []);
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
-      // v7 confirma o fim da BOX pela ausência de dano e usa o total real de
-      // mortes como base seguinte. Tempos anteriores podem terminar cedo.
-      if (saved.version >= 7 && saved.box && typeof saved.box === 'object') {
+      // v9 só abre a BOX no primeiro dano real e não reaproveita mortes que o
+      // painel entregou com atraso. Medições anteriores não são comparáveis.
+      if (saved.version >= 9 && saved.box && typeof saved.box === 'object') {
         state.box.lastKills = Number.isFinite(saved.box.lastKills) ? saved.box.lastKills : null;
         state.box.lastCompletedAt = Number.isFinite(saved.box.lastCompletedAt) ? saved.box.lastCompletedAt : null;
         state.box.current = saved.box.current && typeof saved.box.current === 'object' ? saved.box.current : null;
@@ -9026,13 +9031,18 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     if (!Number.isFinite(kills)) return;
     const respawnMs = daBoxRespawnMs();
     if (Number.isFinite(daState.box.lastCompletedAt) && !Number.isFinite(respawnMs)) return;
-    const bornAt = Number.isFinite(daState.box.lastCompletedAt) && Number.isFinite(respawnMs)
+    const expectedBornAt = Number.isFinite(daState.box.lastCompletedAt) && Number.isFinite(respawnMs)
       ? daState.box.lastCompletedAt + respawnMs
       : now;
-    if (now < bornAt) return;
+    // O dano é a confirmação mais forte de que a criatura já nasceu. Se ele
+    // chegar antes da previsão, começamos agora; se chegar depois, preservamos
+    // o nascimento calculado pelo respawn mostrado no jogo.
+    const bornAt = expectedBornAt > now ? now : expectedBornAt;
     daState.box.current = {
       startAt: bornAt,
-      startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
+      // Fotografa Kills somente no primeiro dano desta BOX. Assim, atualizações
+      // atrasadas da rodada anterior não aparecem como progresso da nova.
+      startKills: kills,
       target: daBoxTarget(),
       respawnMs: Number.isFinite(daState.box.lastCompletedAt) ? respawnMs : null,
       lastDamageAt: now,
@@ -9046,26 +9056,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const metrics = scrapeHuntMetricsFromDom();
     const kills = metrics && metrics.kills;
     if (!Number.isFinite(kills)) return;
-    const previousTurnKills = daState.monsterTurns.lastKills;
-    if (Number.isFinite(previousTurnKills) && kills > previousTurnKills) {
-      daMonsterTurnsOnKills(Math.min(50, kills - previousTurnKills));
+    const liveMonsterKills = daScrapeMonsterKills();
+    const previousMonsterKills = daState.monsterTurns.monsterKills;
+    if (liveMonsterKills.size && previousMonsterKills.size) {
+      const changes = [];
+      for (const [name, count] of liveMonsterKills) {
+        const previous = previousMonsterKills.get(name);
+        if (Number.isFinite(previous) && count > previous) {
+          changes.push({ name, count: Math.min(20, count - previous) });
+        }
+      }
+      if (changes.length) daMonsterTurnsOnNamedKills(changes);
     }
+    if (liveMonsterKills.size) daState.monsterTurns.monsterKills = liveMonsterKills;
     daState.monsterTurns.lastKills = kills;
     daState.box.lastKills = kills;
-    if (!daState.box.current && Number.isFinite(daState.box.lastCompletedAt)) {
-      const respawnMs = daBoxRespawnMs();
-      if (!Number.isFinite(respawnMs)) { daSchedulePaint(); return; }
-      const bornAt = daState.box.lastCompletedAt + respawnMs;
-      if (Date.now() >= bornAt) {
-        daState.box.current = {
-          startAt: bornAt,
-          startKills: Number.isFinite(daState.box.nextStartKills) ? daState.box.nextStartKills : kills,
-          target: daBoxTarget(),
-          respawnMs,
-          lastDamageAt: null,
-        };
-      }
-    }
+    // Não cria uma BOX apenas porque o respawn teórico terminou. Ela será
+    // aberta por daBoxOnDamage quando chegar o primeiro dano real.
     const cur = daState.box.current;
     if (!cur) return;
     const progress = Math.max(0, kills - cur.startKills);
@@ -9074,7 +9081,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     if (!Number.isFinite(cur.targetReachedAt)) cur.targetReachedAt = now;
     const activityAt = Math.max(cur.targetReachedAt, Number(cur.lastDamageAt) || 0);
     if (now - activityAt < DA_BOX_END_QUIET_MS) { daSchedulePaint(); return; }
-    const completedAt = activityAt;
+    const completedAt = Number.isFinite(cur.lastDamageAt) ? cur.lastDamageAt : cur.targetReachedAt;
     const killMs = Math.max(0, completedAt - cur.startAt);
     const totalMs = Number.isFinite(cur.respawnMs) ? cur.respawnMs + killMs : null;
     if (!Number.isFinite(daState.box.bestKillMs) || killMs < daState.box.bestKillMs) {
@@ -9097,7 +9104,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const cur = box.current;
     const progress = cur && Number.isFinite(box.lastKills) ? Math.min(cur.target, Math.max(0, box.lastKills - cur.startKills)) : 0;
     const currentEndAt = cur && Number.isFinite(cur.targetReachedAt)
-      ? Math.max(cur.targetReachedAt, Number(cur.lastDamageAt) || 0)
+      ? (Number.isFinite(cur.lastDamageAt) ? cur.lastDamageAt : cur.targetReachedAt)
       : Date.now();
     const currentKill = cur ? Math.max(0, currentEndAt - cur.startAt) : null;
     const currentTotal = cur && Number.isFinite(cur.respawnMs) ? cur.respawnMs + currentKill : null;
@@ -9142,18 +9149,43 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     if (frameTargets.size) daScheduleSave();
   }
 
-  function daMonsterTurnsOnKills(count) {
+  function daMonsterTurnsOnNamedKills(changes) {
     const mt = daState.monsterTurns;
-    if (!mt || !(count > 0)) return;
-    const candidates = [...mt.active.values()].sort((a, b) => b.lastAt - a.lastAt);
-    for (const mob of candidates.slice(0, count)) {
+    if (!mt || !Array.isArray(changes) || !changes.length) return;
+    const available = [...mt.active.values()].sort((a, b) => b.lastAt - a.lastAt);
+    const used = new Set();
+    const finalize = (mob, name) => {
+      if (!mob || used.has(mob.id)) return false;
+      used.add(mob.id);
+      daState.monsterNames.set(mob.id, name);
       mt.completed.push({
         id: mob.id,
-        name: daState.monsterNames.get(mob.id) || '',
+        name,
         turns: mob.turns,
         damage: mob.damage,
       });
       mt.active.delete(mob.id);
+      return true;
+    };
+
+    // Primeiro usa IDs cujo nome já foi confirmado pelos pacotes de ataque.
+    for (const change of changes) {
+      let remaining = change.count;
+      for (const mob of available) {
+        if (!remaining) break;
+        const known = daState.monsterNames.get(mob.id);
+        if (known && known.toLowerCase() === change.name.toLowerCase() && finalize(mob, change.name)) remaining--;
+      }
+      change.remaining = remaining;
+    }
+    // Para IDs ainda sem nome, o contador nominal do jogo é a autoridade.
+    // Associamos os alvos que receberam dano mais recentemente naquela morte.
+    for (const change of changes) {
+      let remaining = change.remaining;
+      for (const mob of available) {
+        if (!remaining) break;
+        if (finalize(mob, change.name)) remaining--;
+      }
     }
     if (mt.completed.length > 500) mt.completed.splice(0, mt.completed.length - 500);
     daScheduleSave();
@@ -10311,29 +10343,28 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     return result;
   }
 
-  function daHuntMonsterNames() {
-    const names = new Set();
+  function daScrapeMonsterKills() {
+    const rows = new Map();
     try {
-      const lines = String(document.body && document.body.innerText || '').split(/\r?\n/).map((s) => s.trim());
-      const start = lines.findIndex((s) => /^MONSTERS$/i.test(s));
-      if (start < 0) return names;
-      for (let i = start + 1; i < Math.min(lines.length, start + 30); i++) {
-        const line = lines[i];
-        if (/^(LOOT ANALYZER|PARTY HUNT ANALYZER|DANO POR|TURNOS|ROT[AÇC][AÃ]O)/i.test(line)) break;
-        const match = line.match(/^(.+?)\s+(?:×|x)\s*\d+$/i);
-        if (match && match[1].length >= 2 && match[1].length < 50) {
-          names.add(match[1]);
-          continue;
-        }
-        // Em algumas resoluções o nome e o contador "84x" ficam em linhas
-        // separadas no innerText do painel da hunt.
-        if (line.length >= 2 && line.length < 50 && /^(?:×|x)?\s*\d+\s*x?$/i.test(lines[i + 1] || '')) {
-          names.add(line);
-          i++;
-        }
+      // Estrutura confirmada no jogo: H5 "Monsters", seguido por uma lista;
+      // cada filho possui dois <p>: nome e contador (ex.: "Icecold Book", "65x").
+      const heading = [...document.querySelectorAll('h5')]
+        .find((el) => /^monsters$/i.test(String(el.textContent || '').trim()));
+      const list = heading && heading.nextElementSibling;
+      if (!list) return rows;
+      for (const item of [...list.children]) {
+        const fields = item.querySelectorAll('p');
+        if (fields.length < 2) continue;
+        const name = String(fields[0].textContent || '').trim();
+        const match = String(fields[1].textContent || '').trim().match(/^(\d+)\s*x$/i);
+        if (name.length >= 2 && name.length < 50 && match) rows.set(name, Number(match[1]));
       }
     } catch (_) {}
-    return names;
+    return rows;
+  }
+
+  function daHuntMonsterNames() {
+    return new Set(daScrapeMonsterKills().keys());
   }
 
   // Pacotes 0x19 de ataque direto incluem o nome do alvo e o mesmo runtime ID

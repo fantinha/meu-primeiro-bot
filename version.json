@@ -1,5 +1,5 @@
 {
-  "version": "1.5.9",
-  "message": "Adiciona turnos até matar por criatura, contando cada frame de dano como um turno individual para cada monstro da hunt.",
+  "version": "1.6.1",
+  "message": "Corrige os nomes no contador de turnos usando diretamente os contadores de monstros exibidos pelo Hunt Analyzer do jogo.",
   "bot": "bot.js"
 }
