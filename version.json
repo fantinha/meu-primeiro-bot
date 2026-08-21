@@ -1,5 +1,5 @@
 {
-  "version": "1.9.1",
-  "message": "Correção das rotas do Bestiário: seletor dedicado para a hunt inicial e remoção da entrada inválida Beginner Hunt.",
+  "version": "1.9.2",
+  "message": "Lure inteligente nas rotas do Bestiário: usa o máximo oficial de cada hunt sem alterar a configuração salva na aba HUNT.",
   "bot": "bot.js"
 }

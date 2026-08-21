@@ -2909,7 +2909,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.7.1';
+  const VERSION = '1.7.2';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3812,7 +3812,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
               <button type="button" class="sah-best-sync">Sincronizar</button>
             </div>
           </div>
-          <div class="sah-best-hint">A lista vem do catálogo oficial já carregado pelo jogo. O progresso é lido diretamente do Bestiary do personagem ativo — não é necessário entrar nas hunts.</div>
+          <div class="sah-best-hint">A lista vem do catálogo oficial já carregado pelo jogo. O progresso é lido diretamente do Bestiary do personagem ativo. Durante uma rota, o lure usa o máximo oficial de cada hunt sem alterar o lure salvo na aba HUNT.</div>
           <div class="sah-best-route">
             <div class="sah-best-route-top">
               <select class="sah-best-route-mode" title="Modo da rota">
@@ -6037,6 +6037,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       'click',
       (e) => {
         if (!managesLure()) return;
+        // Cliques feitos pelo próprio bot (incluindo o lure automático da
+        // rota do Bestiário) nunca alteram o lure salvo na aba HUNT.
+        if (bot.lureAutoSelecting) return;
         const opts = scanLureOptions();
         if (!opts.length) return;
         const opt = opts.find((o) => o.row.contains(e.target));
@@ -6257,6 +6260,41 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     log(`Lure (máx ${value}) salvo — será aplicado em toda hunt`);
   }
 
+  function bestiaryRouteLurePlan() {
+    const route = bestiaryRouteCfg();
+    const item = route.active ? route.queue[route.currentIndex] : null;
+    if (!item) return null;
+    const hunt = bestiaryStore()[item.key];
+    const maxLure = Number(hunt && hunt.maxLure) || 0;
+    if (maxLure <= 0) return null;
+    const detected = normalizeHuntKey(detectCurrentHuntName());
+    if (detected && detected !== item.key) return null;
+    return { value: maxLure, source: 'bestiary', huntName: hunt.name || item.name };
+  }
+
+  function effectiveLurePlan() {
+    const route = bestiaryRouteCfg();
+    const routePlan = bestiaryRouteLurePlan();
+    if (routePlan) return routePlan;
+    // Com uma rota ativa, nunca cai no lure da aba HUNT. Se o catálogo ainda
+    // não trouxe o maxLure, apenas aguarda a sincronização oficial.
+    if (route.active && route.queue[route.currentIndex]) return null;
+    const saved = Number(cfg.lure) || 0;
+    return saved > 0 ? { value: saved, source: 'hunt', huntName: '' } : null;
+  }
+
+  function chooseLureOption(options, plan) {
+    if (!Array.isArray(options) || !options.length || !plan) return null;
+    const exact = options.find((option) => option.value === plan.value);
+    if (exact || plan.source !== 'bestiary') return exact || null;
+    // Se o jogo não oferecer exatamente o maxLure do catálogo, usa o maior
+    // valor disponível que não ultrapasse o limite. Último fallback: maior
+    // opção visível. Isso evita manter o padrão silenciosamente.
+    const ordered = [...options].filter((option) => Number.isFinite(Number(option.value)))
+      .sort((a, b) => Number(b.value) - Number(a.value));
+    return ordered.find((option) => Number(option.value) <= plan.value) || ordered[0] || null;
+  }
+
   // ------------------------------------------------------------------
   // Aplicação do Lure em SEGUNDO PLANO (não bloqueia a caça)
   // ------------------------------------------------------------------
@@ -6269,8 +6307,15 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   let lureApplying = false;
   async function applyLureIfNeeded() {
     if (!bot.running || lureApplying) return;
-    if (!managesLure() || !cfg.lure) return;
-    if (!inHunt()) { bot.lureAppliedHunt = false; bot.lureAttempts = 0; return; }
+    if (!managesLure()) return;
+    if (!inHunt()) {
+      bot.lureAppliedHunt = false;
+      bot.lureAttempts = 0;
+      bot.bestiaryLureUnavailable = false;
+      return;
+    }
+    const plan = effectiveLurePlan();
+    if (!plan) return;
     if (bot.lureAppliedHunt) return;
 
     const alreadyOpen = scanLureOptions().length > 0;
@@ -6289,14 +6334,28 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         if (bot.lureAttempts >= 6) { log('⚠ Não consegui abrir o Lure nesta hunt — pulando'); bot.lureAppliedHunt = true; }
         return;
       }
-      const opt = opts.find((o) => o.value === cfg.lure);
+      const opt = chooseLureOption(opts, plan);
       if (opt) {
-        if (!opt.selected) { click(opt.row); await sleep(200); }
-        bot.lureUnavailable = false;
-        log(`Lure salvo (máx ${cfg.lure}) aplicado ✔`);
+        if (!opt.selected) {
+          bot.lureAutoSelecting = true;
+          try { click(opt.row); } finally { bot.lureAutoSelecting = false; }
+          await sleep(200);
+        }
+        if (plan.source === 'bestiary') {
+          bot.bestiaryLureUnavailable = false;
+          log(`Lure do Bestiário aplicado: máx ${opt.value} em ${plan.huntName} ✔`);
+        } else {
+          bot.lureUnavailable = false;
+          log(`Lure salvo (máx ${plan.value}) aplicado ✔`);
+        }
       } else {
-        bot.lureUnavailable = true;
-        notify(`A opção de Lure salva (máx ${cfg.lure}) não existe nesta hunt. Mantendo o padrão — defina um novo Lure (o botão está piscando em roxo).`);
+        if (plan.source === 'bestiary') {
+          bot.bestiaryLureUnavailable = true;
+          notify(`Não encontrei uma opção de Lure válida para ${plan.huntName}. Mantendo o padrão desta hunt.`);
+        } else {
+          bot.lureUnavailable = true;
+          notify(`A opção de Lure salva (máx ${plan.value}) não existe nesta hunt. Mantendo o padrão — defina um novo Lure (o botão está piscando em roxo).`);
+        }
       }
       const done = find.concluir();
       if (done) { click(done); await sleep(300); }
@@ -6310,7 +6369,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // Aplica/remove a luz pulsante roxa no botão de Lure. Pulsa quando o líder
   // ainda não definiu um lure, ou quando o lure salvo não existe na hunt atual.
   function updateLurePulse() {
-    const shouldPulse = managesLure() && (!cfg.lure || bot.lureUnavailable);
+    const plan = effectiveLurePlan();
+    const shouldPulse = managesLure() && (
+      !plan ||
+      (plan.source === 'bestiary' ? bot.bestiaryLureUnavailable : bot.lureUnavailable)
+    );
     const btn = findLureButton();
     // limpa a classe de qualquer botão antigo que não seja o atual
     document.querySelectorAll('.sah-lure-pulse').forEach((e) => {
@@ -8898,6 +8961,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const huntChanged = !oldHunt.id || Number(oldHunt.id) !== Number(hunt.id) ||
         String(oldHunt.name || '') !== String(hunt.title) ||
         Number(oldHunt.recommendedLevel) !== (Number(hunt.recommendedLevel) || 0) ||
+        Number(oldHunt.maxLure) !== (Number(hunt.maxLure) || 0) ||
         oldHunt.isUnlocked !== (hunt.unlockedByDefault !== false || unlocked.has(Number(hunt.id))) ||
         Object.keys(oldMonsters).length !== Object.keys(monsters).length ||
         oldHunt.completed !== completed;
@@ -8908,6 +8972,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         name: String(hunt.title),
         recommendedLevel: Number(hunt.recommendedLevel) || 0,
         levelMin: Number(hunt.levelMin) || 0,
+        maxLure: Number(hunt.maxLure) || 0,
         isUnlocked: hunt.unlockedByDefault !== false || unlocked.has(Number(hunt.id)),
         unlockedByDefault: hunt.unlockedByDefault !== false,
         monsters,
@@ -9380,6 +9445,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     const current = route.queue[route.currentIndex] || null;
     const next = route.queue[route.currentIndex + 1] || null;
+    const currentHunt = current ? bestiaryStore()[current.key] : null;
+    const routeLure = Number(currentHunt && currentHunt.maxLure) || 0;
     if (ui.bestiaryRouteMeta) {
       if (!route.queue.length) {
         const modeHint = route.mode === 'manual'
@@ -9395,6 +9462,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           (route.active ? 'ATIVA' : 'PAUSADA') + ' · ' +
           (current ? 'Atual: ' + current.name : 'Sem hunt atual') +
           (next ? ' · Próxima: ' + next.name : '') +
+          (routeLure ? ' · Lure automático: máx ' + routeLure : '') +
           ' · ' + Math.min(route.currentIndex + 1, route.queue.length) + '/' + route.queue.length;
       }
     }
