@@ -1,5 +1,5 @@
 {
-  "version": "1.5.8",
-  "message": "Melhora a detecção do fim da BOX, impede o respawn de começar enquanto ainda há dano e elimina o atraso do tempo registrado.",
+  "version": "1.5.9",
+  "message": "Adiciona turnos até matar por criatura, contando cada frame de dano como um turno individual para cada monstro da hunt.",
   "bot": "bot.js"
 }

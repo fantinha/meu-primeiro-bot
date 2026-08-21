@@ -2846,7 +2846,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.4';
+  const VERSION = '1.4.5';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -8755,6 +8755,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
       skills: new Map(),
       rotations: new Map(),
+      monsterNames: new Map(),
+      monsterTurns: {
+        active: new Map(),
+        completed: [],
+        lastKills: null,
+      },
 
       box: {
         lastKills: null,
@@ -8780,7 +8786,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     try {
       const elapsedMs = daState.startedAt != null && daState.updatedAt != null ? Math.max(0, daState.updatedAt - daState.startedAt) : 0;
       const data = {
-        version: 7, elapsedMs,
+        version: 8, elapsedMs,
         entities: [...daState.entities.values()].map((b) => ({ ...b, dealtWin: [], takenWin: [], dealtEl: [...b.dealtEl.entries()], takenEl: [...b.takenEl.entries()] })),
         names: [...daState.names.entries()], vocations: [...daState.vocations.entries()], partyIds: [...daState.partyIds],
         skills: [...daState.skills.values()].map((s) => ({ ...s, lastAt: 0, lastCastAt: null })),
@@ -8789,6 +8795,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           transitions: [...r.transitions.entries()], events: r.events.slice(-200),
           lastSkill: r.lastSkill || '', lastCastAt: null,
         })),
+        monsterNames: [...daState.monsterNames.entries()],
+        monsterTurns: {
+          active: [...daState.monsterTurns.active.entries()],
+          completed: daState.monsterTurns.completed.slice(-500),
+          lastKills: daState.monsterTurns.lastKills,
+        },
         frames: daState.frames, parsedFrames: daState.parsedFrames, confirmedHits: daState.confirmedHits,
         invalidFrames: daState.invalidFrames, ignoredSgFrames: daState.ignoredSgFrames,
         lastOp: daState.lastOp, lastErr: daState.lastErr, lastLen: daState.lastLen,
@@ -8809,7 +8821,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       const raw = sessionStorage.getItem(DA_SESSION_KEY);
       if (!raw) return daCreateState();
       const saved = JSON.parse(raw);
-      if (!saved || ![1, 2, 3, 4, 5, 6, 7].includes(saved.version)) return daCreateState();
+      if (!saved || ![1, 2, 3, 4, 5, 6, 7, 8].includes(saved.version)) return daCreateState();
       const state = daCreateState();
       const now = daNow();
       const elapsedMs = Math.max(0, Number(saved.elapsedMs) || 0);
@@ -8843,6 +8855,13 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           transitions: new Map(r.transitions || []), events: Array.isArray(r.events) ? r.events.slice(-200) : [],
           lastSkill: '', lastCastAt: null,
         });
+      }
+      if (saved.version >= 8) {
+        state.monsterNames = new Map(saved.monsterNames || []);
+        const mt = saved.monsterTurns || {};
+        state.monsterTurns.active = new Map(mt.active || []);
+        state.monsterTurns.completed = Array.isArray(mt.completed) ? mt.completed.slice(-500) : [];
+        state.monsterTurns.lastKills = Number.isFinite(mt.lastKills) ? mt.lastKills : null;
       }
       for (const key of ['frames', 'parsedFrames', 'confirmedHits', 'invalidFrames', 'ignoredSgFrames', 'lastOp', 'lastErr', 'lastLen', 'lastSource', 'lastSpellStrings']) if (saved[key] !== undefined) state[key] = saved[key];
       // v7 confirma o fim da BOX pela ausência de dano e usa o total real de
@@ -9027,6 +9046,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     const metrics = scrapeHuntMetricsFromDom();
     const kills = metrics && metrics.kills;
     if (!Number.isFinite(kills)) return;
+    const previousTurnKills = daState.monsterTurns.lastKills;
+    if (Number.isFinite(previousTurnKills) && kills > previousTurnKills) {
+      daMonsterTurnsOnKills(Math.min(50, kills - previousTurnKills));
+    }
+    daState.monsterTurns.lastKills = kills;
     daState.box.lastKills = kills;
     if (!daState.box.current && Number.isFinite(daState.box.lastCompletedAt)) {
       const respawnMs = daBoxRespawnMs();
@@ -9090,6 +9114,73 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       '<div><small>MELHOR TOTAL</small><b>' + daBoxFmtMs(box.bestTotalMs) + '</b></div>' +
       '</div>' +
       '<div class="da-empty small">Total = respawn oficial + eliminação. Um novo recorde substitui automaticamente o anterior.</div>';
+  }
+
+  function daRecordMonsterTurns(hits) {
+    if (!hits || !hits.length || !daState.monsterTurns) return;
+    const frameTargets = new Map();
+    for (const hit of hits) {
+      const id = Number(hit && hit.targetMonsterId);
+      if (!Number.isInteger(id) || id <= 0 || !(hit.amount > 0)) continue;
+      const row = frameTargets.get(id) || { damage: 0, name: '' };
+      row.damage += hit.amount;
+      if (hit.targetMonsterName) row.name = String(hit.targetMonsterName).trim();
+      frameTargets.set(id, row);
+    }
+    const now = Date.now();
+    for (const [id, frame] of frameTargets) {
+      if (frame.name) daState.monsterNames.set(id, frame.name);
+      const current = daState.monsterTurns.active.get(id) || {
+        id, turns: 0, damage: 0, firstAt: now, lastAt: now,
+      };
+      // Um frame com um ou vários danos no mesmo monstro representa um turno.
+      current.turns++;
+      current.damage += frame.damage;
+      current.lastAt = now;
+      daState.monsterTurns.active.set(id, current);
+    }
+    if (frameTargets.size) daScheduleSave();
+  }
+
+  function daMonsterTurnsOnKills(count) {
+    const mt = daState.monsterTurns;
+    if (!mt || !(count > 0)) return;
+    const candidates = [...mt.active.values()].sort((a, b) => b.lastAt - a.lastAt);
+    for (const mob of candidates.slice(0, count)) {
+      mt.completed.push({
+        id: mob.id,
+        name: daState.monsterNames.get(mob.id) || '',
+        turns: mob.turns,
+        damage: mob.damage,
+      });
+      mt.active.delete(mob.id);
+    }
+    if (mt.completed.length > 500) mt.completed.splice(0, mt.completed.length - 500);
+    daScheduleSave();
+  }
+
+  function daMonsterTurnsHtml() {
+    const completed = daState.monsterTurns && daState.monsterTurns.completed || [];
+    if (!completed.length) {
+      return '<div class="da-empty small">Aguardando criaturas eliminadas para calcular os turnos…</div>';
+    }
+    const groups = new Map();
+    for (const mob of completed) {
+      const name = daState.monsterNames.get(mob.id) || mob.name || ('Criatura #' + mob.id);
+      const row = groups.get(name) || { name, count: 0, turns: 0, worst: 0, damage: 0 };
+      row.count++;
+      row.turns += Number(mob.turns) || 0;
+      row.worst = Math.max(row.worst, Number(mob.turns) || 0);
+      row.damage += Number(mob.damage) || 0;
+      groups.set(name, row);
+    }
+    return '<div class="da-monster-turns">' + [...groups.values()]
+      .sort((a, b) => (a.turns / a.count) - (b.turns / b.count))
+      .map((row) => '<div class="da-monster-turn-row">' +
+        '<span title="' + row.name + '">' + row.name + ' <small>×' + row.count + '</small></span>' +
+        '<b>' + (row.turns / row.count).toFixed(1).replace('.', ',') + ' turnos</b>' +
+        '<em>pior ' + row.worst + ' · ' + daFmt(row.damage / row.count) + ' dano</em>' +
+        '</div>').join('') + '</div>';
   }
 
   function daPeak(win, amount, at, prevMax) {
@@ -10159,11 +10250,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         if (flags & 256) r.u8();
 
         let targetRuntimePlayerId = null;
+        let targetMonsterId = null;
+        let targetMonsterName = '';
         if (flags & 128) {
-          if (targetIsMonster) r.u16();
+          if (targetIsMonster) targetMonsterId = r.u16();
           else targetRuntimePlayerId = r.u8();
         } else {
-          str8();
+          const targetName = str8();
+          if (targetIsMonster) targetMonsterName = targetName;
         }
         const isExp = !!(flags & 1);
         const isHeal = !!(flags & 2);
@@ -10186,7 +10280,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           ctx.sourceAttackName || (ctx.sourceAttackType === 'auto_attack' ? 'Auto-Attack' : '')
         ).trim();
         if (daIdOk(sourceId)) {
-          const hit = { runtimePlayerId: sourceId, asDealt: true, amount, element, skill: skillName };
+          const hit = {
+            runtimePlayerId: sourceId, asDealt: true, amount, element, skill: skillName,
+            targetMonsterId, targetMonsterName,
+          };
           result.dealtHits.push(hit);
           if (skillName) {
             const key = sourceId + '\u0000' + skillName;
@@ -10212,6 +10309,70 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       daState.lastErr = String(e && e.message ? e.message : e).slice(0, 100);
     }
     return result;
+  }
+
+  function daHuntMonsterNames() {
+    const names = new Set();
+    try {
+      const lines = String(document.body && document.body.innerText || '').split(/\r?\n/).map((s) => s.trim());
+      const start = lines.findIndex((s) => /^MONSTERS$/i.test(s));
+      if (start < 0) return names;
+      for (let i = start + 1; i < Math.min(lines.length, start + 30); i++) {
+        const line = lines[i];
+        if (/^(LOOT ANALYZER|PARTY HUNT ANALYZER|DANO POR|TURNOS|ROT[AÇC][AÃ]O)/i.test(line)) break;
+        const match = line.match(/^(.+?)\s+(?:×|x)\s*\d+$/i);
+        if (match && match[1].length >= 2 && match[1].length < 50) {
+          names.add(match[1]);
+          continue;
+        }
+        // Em algumas resoluções o nome e o contador "84x" ficam em linhas
+        // separadas no innerText do painel da hunt.
+        if (line.length >= 2 && line.length < 50 && /^(?:×|x)?\s*\d+\s*x?$/i.test(lines[i + 1] || '')) {
+          names.add(line);
+          i++;
+        }
+      }
+    } catch (_) {}
+    return names;
+  }
+
+  // Pacotes 0x19 de ataque direto incluem o nome do alvo e o mesmo runtime ID
+  // usado pelo 0x1c. Eles servem apenas para nomear a criatura; os turnos são
+  // contabilizados exclusivamente no 0x1c para não duplicar frames.
+  function daLearnMonsterNamesFrom19(buf) {
+    try {
+      const r = new DaReader(buf);
+      if (r.rem() < 5 || r.u8() !== 0x53 || r.u8() !== 0x47) return;
+      r.u8();
+      if (r.u8() !== 0x19) return;
+      const stringCount = r.u8();
+      if (stringCount > 64) return;
+      const strings = [];
+      for (let i = 0; i < stringCount; i++) strings.push(r.str());
+      const huntNames = daHuntMonsterNames();
+      const candidates = strings.filter((value) => {
+        const name = String(value || '').trim();
+        return [...huntNames].some((known) => known.toLowerCase() === name.toLowerCase());
+      });
+      if (candidates.length !== 1) return;
+      const targetName = candidates[0];
+      while (r.rem() >= 13) {
+        const start = r.o;
+        const tag = r.u8();
+        if (tag !== 0xf8 && tag !== 0x78) { r.o = start + 1; continue; }
+        if (r.rem() < 12) break;
+        r.u16();
+        const amount = r.u16();
+        r.i8(); r.i8();
+        const targetMonsterId = r.u16();
+        r.u16(); r.u8(); r.u8();
+        if (amount > 0 && targetMonsterId > 0) {
+          daState.monsterNames.set(targetMonsterId, targetName);
+          const active = daState.monsterTurns.active.get(targetMonsterId);
+          if (active) active.name = targetName;
+        }
+      }
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------------
@@ -10617,6 +10778,8 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           buf
         );
 
+      daRecordMonsterTurns(parsed.dealtHits);
+
       for (const skillEvent of parsed.skillEvents || []) daRecordSkill(skillEvent);
 
       if (
@@ -10657,6 +10820,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       opcode === 0x19 ||
       opcode === 0x12
     ) {
+      if (opcode === 0x19) daLearnMonsterNamesFrom19(buf);
       const parsed =
         daParseCombatFrame(
           buf
@@ -10752,6 +10916,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
     const rotationHtml = daRotationHtml(rows);
     const boxHtml = daBoxHtml();
+    const monsterTurnsHtml = daMonsterTurnsHtml();
 
     const status =
       'v2.2.0' +
@@ -10997,6 +11162,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       '</section>' +
 
       '<section class="da-section">' +
+      '<div class="da-section-title">TURNOS ATÉ MATAR</div>' +
+      monsterTurnsHtml +
+      '</section>' +
+
+      '<section class="da-section">' +
       '<div class="da-section-title">' +
       'DANO POR PLAYER' +
       '</div>' +
@@ -11190,6 +11360,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     '.da-turn-row{padding:3px 0;border-top:1px solid rgba(120,90,40,.12);color:#9d9588;}' +
     '.da-turn-head span:not(:first-child),.da-turn-row span:not(:first-child),.da-turn-row b{text-align:right;}' +
     '.da-turn-row b{color:#c89b3c;}' +
+    '.da-monster-turns{display:flex;flex-direction:column;gap:2px;}' +
+    '.da-monster-turn-row{display:grid;grid-template-columns:minmax(105px,1fr) auto auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid rgba(120,90,40,.18);font-variant-numeric:tabular-nums;}' +
+    '.da-monster-turn-row>span{font-size:9px;color:#c6c1b7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+    '.da-monster-turn-row small{font-size:7px;color:#777269;}' +
+    '.da-monster-turn-row b{font-size:10px;color:#d5a62e;white-space:nowrap;}' +
+    '.da-monster-turn-row em{font-size:7px;color:#777269;font-style:normal;white-space:nowrap;text-align:right;}' +
 
     '.da-list{' +
     'display:flex;' +
@@ -11430,11 +11606,37 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           node.runtimePlayerId ??
           node.runtime_player_id;
 
+        const monsterId =
+          node.runtimeMonsterId ??
+          node.runtime_monster_id ??
+          node.monsterRuntimeId ??
+          node.monster_runtime_id ??
+          node.runtimeCreatureId ??
+          node.runtime_creature_id;
+
         const name =
           node.name ||
           node.nickname ||
           node.characterName ||
           node.displayName;
+
+        const monsterName =
+          node.monsterName ||
+          node.monster_name ||
+          node.creatureName ||
+          node.creature_name ||
+          name;
+
+        if (
+          Number.isInteger(Number(monsterId)) &&
+          Number(monsterId) > 0 &&
+          typeof monsterName === 'string'
+        ) {
+          const cleanMonsterName = monsterName.trim();
+          if (cleanMonsterName.length >= 2 && cleanMonsterName.length < 50) {
+            daState.monsterNames.set(Number(monsterId), cleanMonsterName);
+          }
+        }
 
         const vocationRaw =
           node.vocation ??
