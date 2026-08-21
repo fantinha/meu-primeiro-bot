@@ -223,9 +223,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     huntPresets: {},
     presetAutoApply: false, // aplicar preset ao entrar na hunt (só se bot ligado)
     huntMetrics: {}, // chave "hunt|solo" / "hunt|party" → { huntName, mode, runs[] }
-    // Catálogo aprendido diretamente do Hunt Analyzer + progresso oficial lido
-    // em Stonegypedia > Bestiary. Fica no perfil para acompanhar o personagem.
+    // Catálogo oficial das hunts + progresso do Bestiary do personagem.
+    // Ambos são lidos das mesmas estruturas já carregadas pelo jogo.
     bestiaryHunts: {},
+    bestiaryCatalogAt: 0,
   };
 
   // store = { active, profiles: { nome: cfg }, chars: { nickLower: nome } }
@@ -2849,7 +2850,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3107,12 +3108,17 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           margin-bottom:7px;
         }
         #stonegy-auto-hunt .sah-best-head .sah-section-title { flex:1; margin:2px 0 0; }
-        #stonegy-auto-hunt .sah-best-sync {
+        #stonegy-auto-hunt .sah-best-actions { display:flex; gap:5px; flex-shrink:0; }
+        #stonegy-auto-hunt .sah-best-sync,
+        #stonegy-auto-hunt .sah-best-refresh {
           width:auto; flex-shrink:0; margin:0; padding:5px 9px;
           background:#2d5f3b; color:#dff4e5; border:1px solid #4f8e60;
         }
-        #stonegy-auto-hunt .sah-best-sync:hover { background:#377349; }
-        #stonegy-auto-hunt .sah-best-sync:disabled { opacity:.55; cursor:wait; }
+        #stonegy-auto-hunt .sah-best-refresh { background:#243643; border-color:#3f6478; color:#c8e0ec; }
+        #stonegy-auto-hunt .sah-best-sync:hover,
+        #stonegy-auto-hunt .sah-best-refresh:hover { filter:brightness(1.15); }
+        #stonegy-auto-hunt .sah-best-sync:disabled,
+        #stonegy-auto-hunt .sah-best-refresh:disabled { opacity:.55; cursor:wait; }
         #stonegy-auto-hunt .sah-best-tools { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
         #stonegy-auto-hunt .sah-best-tools input,
         #stonegy-auto-hunt .sah-best-tools select { min-width:0; }
@@ -3711,14 +3717,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         <div class="sah-tab-content" data-tab-content="bestiary">
           <div class="sah-best-head">
             <div class="sah-section-title">Bestiário por hunt</div>
-            <button type="button" class="sah-best-sync">Sincronizar</button>
+            <div class="sah-best-actions">
+              <button type="button" class="sah-best-refresh" title="Recarregar a lista oficial de hunts e monstros">Hunts</button>
+              <button type="button" class="sah-best-sync">Sincronizar</button>
+            </div>
           </div>
-          <div class="sah-best-hint">Os monstros vêm do Hunt Analyzer. As mortes e os marcos vêm do Bestiary oficial do personagem ativo. Ao entrar numa hunt pela primeira vez, ela é aprendida automaticamente.</div>
+          <div class="sah-best-hint">A lista vem do catálogo oficial já carregado pelo jogo. O progresso é lido diretamente do Bestiary do personagem ativo — não é necessário entrar nas hunts.</div>
           <div class="sah-best-tools">
             <select class="sah-best-hunt" title="Hunt acompanhada"></select>
-            <input type="search" class="sah-best-search" placeholder="Filtrar monstro…" autocomplete="off">
+            <select class="sah-best-filter" title="Filtrar hunts">
+              <option value="all">Todas as hunts</option>
+              <option value="pending">Bestiário incompleto</option>
+              <option value="done">Bestiário completo</option>
+              <option value="unsynced">Ainda não sincronizadas</option>
+            </select>
+            <input type="search" class="sah-best-search" placeholder="Filtrar monstro…" autocomplete="off" style="grid-column:1 / -1">
           </div>
-          <div class="sah-best-status">Aguardando uma hunt reconhecida.</div>
+          <div class="sah-best-status">Carregando o catálogo oficial…</div>
           <div class="sah-best-summary"></div>
           <div class="sah-best-list"></div>
         </div>
@@ -4022,8 +4037,10 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       bossStatus: root.querySelector('.sah-boss-status'),
       daContainer: root.querySelector('.sah-da-container'),
       bestiaryHunt: root.querySelector('.sah-best-hunt'),
+      bestiaryFilter: root.querySelector('.sah-best-filter'),
       bestiarySearch: root.querySelector('.sah-best-search'),
       bestiarySync: root.querySelector('.sah-best-sync'),
+      bestiaryRefresh: root.querySelector('.sah-best-refresh'),
       bestiaryStatus: root.querySelector('.sah-best-status'),
       bestiarySummary: root.querySelector('.sah-best-summary'),
       bestiaryList: root.querySelector('.sah-best-list'),
@@ -4702,6 +4719,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         if (tab === 'bestiary') {
           bestiaryLearnCurrentHunt();
           renderBestiaryTab();
+          bestiarySyncFromGame({ announce: false });
         }
       });
     });
@@ -4713,7 +4731,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       });
     }
     if (ui.bestiarySearch) ui.bestiarySearch.addEventListener('input', renderBestiaryTab);
+    if (ui.bestiaryFilter) ui.bestiaryFilter.addEventListener('change', () => {
+      bestiarySelectedKey = '';
+      renderBestiaryTab();
+    });
     if (ui.bestiarySync) ui.bestiarySync.addEventListener('click', bestiarySyncSelected);
+    if (ui.bestiaryRefresh) ui.bestiaryRefresh.addEventListener('click', () => bestiarySyncFromGame({ announce: true }));
 
     ui.bossEnterBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -8545,7 +8568,19 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
   // progresso vem exclusivamente da Stonegypedia oficial do personagem:
   // total de mortes + os três marcos expostos em aria-label pelo jogo.
   let bestiarySyncing = false;
+  let bestiaryRuntimeSyncing = false;
   let bestiarySelectedKey = '';
+
+  // IDs/exports da versão atual do cliente. O código abaixo apenas lê os
+  // mesmos catálogos e o mesmo estado usados por Stonegypedia; não envia
+  // comandos nem altera o estado do jogo. Se o jogo trocar o bundle, a
+  // sincronização visual antiga continua disponível como fallback.
+  const BESTIARY_RUNTIME_MODULES = {
+    hunts: 12072,
+    monsters: 27355,
+    rules: 37129,
+    character: 79585,
+  };
 
   function bestiaryHtml(value) {
     return String(value == null ? '' : value)
@@ -8568,6 +8603,155 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       cfg.bestiaryHunts = {};
     }
     return cfg.bestiaryHunts;
+  }
+
+  function bestiaryRuntimeSnapshot() {
+    try {
+      const req = getStonegyWebpackRequire();
+      if (!req) return null;
+      const huntsApi = req(BESTIARY_RUNTIME_MODULES.hunts);
+      const monstersApi = req(BESTIARY_RUNTIME_MODULES.monsters);
+      const rulesApi = req(BESTIARY_RUNTIME_MODULES.rules);
+      const characterApi = req(BESTIARY_RUNTIME_MODULES.character);
+      if (!huntsApi || typeof huntsApi.YZ !== 'function') return null;
+      if (!monstersApi || typeof monstersApi.s_ !== 'function') return null;
+      if (!rulesApi || typeof rulesApi.lb !== 'function') return null;
+      if (!characterApi || typeof characterApi.yP !== 'function' || typeof characterApi.WZ !== 'function') return null;
+      const hunts = huntsApi.YZ();
+      const monsters = monstersApi.s_();
+      const state = characterApi.yP();
+      const kills = characterApi.WZ(state) || {};
+      if (!Array.isArray(hunts) || !hunts.length || !Array.isArray(monsters) || !monsters.length) return null;
+      const characterName = typeof characterApi.VM === 'function' ? String(characterApi.VM(state) || '') : '';
+      return { hunts, monsters, kills, rulesApi, characterName };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function bestiaryKillValue(kills, monsterId) {
+    if (!kills || monsterId == null) return 0;
+    const raw = kills[monsterId] != null ? kills[monsterId] : kills[String(monsterId)];
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  }
+
+  function bestiaryApplyRuntime(snapshot) {
+    if (!snapshot) return { hunts: 0, monsters: 0, complete: 0 };
+    const catalog = bestiaryStore();
+    const byId = new Map(snapshot.monsters.map((monster) => [Number(monster.id), monster]));
+    let monsterLinks = 0;
+    let completeHunts = 0;
+    let changed = false;
+    const now = Date.now();
+
+    for (const hunt of snapshot.hunts) {
+      if (!hunt || !hunt.title || !Array.isArray(hunt.monsters)) continue;
+      const huntKey = normalizeHuntKey(hunt.title);
+      const oldHunt = catalog[huntKey] && typeof catalog[huntKey] === 'object' ? catalog[huntKey] : {};
+      const oldMonsters = oldHunt.monsters && typeof oldHunt.monsters === 'object' ? oldHunt.monsters : {};
+      const monsters = {};
+      let huntProgressChanged = false;
+      for (const rawId of hunt.monsters) {
+        const monsterId = Number(rawId);
+        const official = byId.get(monsterId);
+        if (!official || !official.name) continue;
+        let limits = null;
+        try { limits = snapshot.rulesApi.lb(official); } catch (_) {}
+        const first = Math.max(0, Number(limits && limits.firstUnlock) || 0);
+        const second = Math.max(first, Number(limits && limits.secondUnlock) || first);
+        const finalTarget = Math.max(second, Number(limits && limits.finalUnlock) || second);
+        const totalKills = bestiaryKillValue(snapshot.kills, monsterId);
+        const monsterKey = normalizeHuntKey(official.name);
+        const previous = oldMonsters[monsterKey] && typeof oldMonsters[monsterKey] === 'object'
+          ? oldMonsters[monsterKey]
+          : {};
+        const stages = finalTarget > 0
+          ? [first, second, finalTarget].filter((target, index, values) => target > 0 && values.indexOf(target) === index)
+              .map((target) => ({ current: Math.min(totalKills, target), target }))
+          : [];
+        const monsterChanged = Number(previous.id) !== monsterId ||
+          Number(previous.totalKills) !== totalKills ||
+          Number(previous.finalTarget) !== finalTarget ||
+          String(previous.name || '') !== String(official.name);
+        if (monsterChanged) {
+          changed = true;
+          huntProgressChanged = true;
+        }
+        monsters[monsterKey] = {
+          ...previous,
+          id: monsterId,
+          name: official.name,
+          image: official.image || previous.image || '',
+          difficulty: Number(official.bestiaryDifficulty) || previous.difficulty || 0,
+          totalKills,
+          finalTarget,
+          pendingKills: Math.max(0, finalTarget - totalKills),
+          stages,
+          completed: finalTarget > 0 && totalKills >= finalTarget,
+          notFound: false,
+          source: 'game-runtime',
+          syncedAt: monsterChanged ? now : (previous.syncedAt || now),
+        };
+        monsterLinks += 1;
+      }
+      const monsterValues = Object.values(monsters);
+      const completed = monsterValues.length > 0 && monsterValues.every((monster) => monster.completed === true);
+      if (completed) completeHunts += 1;
+      const huntChanged = !oldHunt.id || Number(oldHunt.id) !== Number(hunt.id) ||
+        String(oldHunt.name || '') !== String(hunt.title) ||
+        Object.keys(oldMonsters).length !== Object.keys(monsters).length ||
+        oldHunt.completed !== completed;
+      if (huntChanged) changed = true;
+      catalog[huntKey] = {
+        ...oldHunt,
+        id: Number(hunt.id),
+        name: String(hunt.title),
+        recommendedLevel: Number(hunt.recommendedLevel) || 0,
+        levelMin: Number(hunt.levelMin) || 0,
+        monsters,
+        source: 'official-runtime',
+        completed,
+        learnedAt: oldHunt.learnedAt || now,
+        updatedAt: huntChanged ? now : (oldHunt.updatedAt || now),
+        lastSyncAt: (huntChanged || huntProgressChanged) ? now : (oldHunt.lastSyncAt || now),
+      };
+    }
+    if (changed || !cfg.bestiaryCatalogAt) {
+      cfg.bestiaryCatalogAt = now;
+      saveConfig();
+    }
+    return { hunts: snapshot.hunts.length, monsters: monsterLinks, complete: completeHunts, characterName: snapshot.characterName, changed };
+  }
+
+  async function bestiarySyncFromGame(options) {
+    if (bestiaryRuntimeSyncing) return false;
+    bestiaryRuntimeSyncing = true;
+    const announce = !!(options && options.announce);
+    try {
+      if (announce) bestiarySetStatus('Lendo hunts, monstros e progresso do personagem…', '');
+      let snapshot = null;
+      for (let attempt = 0; attempt < 12 && !snapshot; attempt += 1) {
+        snapshot = bestiaryRuntimeSnapshot();
+        if (!snapshot) await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!snapshot) return false;
+      const result = bestiaryApplyRuntime(snapshot);
+      renderBestiaryTab();
+      if (announce) {
+        bestiarySetStatus(
+          result.hunts + ' hunts oficiais sincronizadas para ' + (result.characterName || 'o personagem ativo') + '.',
+          'ok'
+        );
+        log('Bestiário: ' + result.hunts + ' hunts oficiais atualizadas (' + result.complete + ' completas)');
+      }
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      bestiaryRuntimeSyncing = false;
+      renderBestiaryTab();
+    }
   }
 
   function bestiaryCurrentEntry() {
@@ -8621,19 +8805,40 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         saved: value,
       });
     }
-    const extras = [cfg.huntName, ...(Array.isArray(cfg.recentHunts) ? cfg.recentHunts : [])];
-    for (const raw of extras) {
-      const name = String(raw || '').trim();
-      if (!name) continue;
-      const key = normalizeHuntKey(name);
-      if (!out.has(key)) out.set(key, { key, name, monsters: {}, saved: null });
+    // Compatibilidade com perfis anteriores: só usa histórico local quando o
+    // catálogo oficial ainda não conseguiu carregar.
+    if (!out.size) {
+      const extras = [cfg.huntName, ...(Array.isArray(cfg.recentHunts) ? cfg.recentHunts : [])];
+      for (const raw of extras) {
+        const name = String(raw || '').trim();
+        if (!name) continue;
+        const key = normalizeHuntKey(name);
+        if (!out.has(key)) out.set(key, { key, name, monsters: {}, saved: null });
+      }
     }
     const current = inHunt() ? normalizeHuntKey(detectCurrentHuntName()) : '';
     return [...out.values()].sort((a, b) => {
       if (a.key === current) return -1;
       if (b.key === current) return 1;
+      const levelA = Number(a.saved && a.saved.recommendedLevel) || 0;
+      const levelB = Number(b.saved && b.saved.recommendedLevel) || 0;
+      if (levelA !== levelB) return levelA - levelB;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
+  }
+
+  function bestiaryHuntState(hunt) {
+    const monsters = Object.values((hunt && hunt.monsters) || {}).filter(Boolean);
+    const synced = monsters.filter((monster) => Number.isFinite(Number(monster.totalKills)) && Number(monster.finalTarget) > 0).length;
+    const done = monsters.filter((monster) => monster.completed === true).length;
+    return {
+      monsters,
+      synced,
+      done,
+      pending: monsters.reduce((sum, monster) => sum + Math.max(0, Number(monster.pendingKills) || 0), 0),
+      complete: monsters.length > 0 && done === monsters.length,
+      unsynced: !monsters.length || synced < monsters.length,
+    };
   }
 
   function bestiarySetStatus(text, type) {
@@ -8644,14 +8849,23 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   function renderBestiaryTab() {
     if (!ui || !ui.bestiaryHunt || !ui.bestiaryList) return;
-    const hunts = bestiaryKnownHunts();
+    const allHunts = bestiaryKnownHunts();
+    const huntFilter = String(ui.bestiaryFilter && ui.bestiaryFilter.value || 'all');
+    let hunts = allHunts.filter((hunt) => {
+      const state = bestiaryHuntState(hunt);
+      if (huntFilter === 'done') return state.complete;
+      if (huntFilter === 'pending') return !state.complete && !state.unsynced;
+      if (huntFilter === 'unsynced') return state.unsynced;
+      return true;
+    });
     const currentKey = inHunt() ? normalizeHuntKey(detectCurrentHuntName()) : '';
     const previous = bestiarySelectedKey || ui.bestiaryHunt.value || currentKey;
     ui.bestiaryHunt.innerHTML = '';
     for (const hunt of hunts) {
+      const state = bestiaryHuntState(hunt);
       const option = document.createElement('option');
       option.value = hunt.key;
-      option.textContent = hunt.name;
+      option.textContent = (state.complete ? '✓ ' : (state.unsynced ? '? ' : '• ')) + hunt.name;
       ui.bestiaryHunt.appendChild(option);
     }
     if (hunts.some((h) => h.key === previous)) bestiarySelectedKey = previous;
@@ -8667,35 +8881,43 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
     const synced = allMonsters.filter((m) => Array.isArray(m.stages) && m.stages.length).length;
     const done = allMonsters.filter((m) => m.completed === true).length;
+    const pendingKills = allMonsters.reduce((sum, monster) => sum + Math.max(0, Number(monster.pendingKills) || 0), 0);
 
     if (ui.bestiarySync) {
-      ui.bestiarySync.disabled = bestiarySyncing || !allMonsters.length;
-      ui.bestiarySync.textContent = bestiarySyncing ? 'Lendo…' : 'Sincronizar';
+      ui.bestiarySync.disabled = bestiarySyncing || bestiaryRuntimeSyncing;
+      ui.bestiarySync.textContent = (bestiarySyncing || bestiaryRuntimeSyncing) ? 'Lendo…' : 'Sincronizar';
+    }
+    if (ui.bestiaryRefresh) {
+      ui.bestiaryRefresh.disabled = bestiaryRuntimeSyncing;
+      ui.bestiaryRefresh.textContent = bestiaryRuntimeSyncing ? '…' : 'Hunts';
     }
     if (ui.bestiarySummary) {
       ui.bestiarySummary.innerHTML =
         '<div class="sah-best-stat"><b>' + allMonsters.length + '</b>monstros</div>' +
         '<div class="sah-best-stat"><b>' + done + '</b>completos</div>' +
-        '<div class="sah-best-stat"><b>' + Math.max(0, allMonsters.length - synced) + '</b>não lidos</div>';
+        '<div class="sah-best-stat"><b>' + bestiaryFmt(pendingKills) + '</b>mortes pendentes</div>';
     }
 
     if (!selected) {
-      bestiarySetStatus('Entre em uma hunt para a extensão reconhecer seus monstros.', 'warn');
-      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Nenhuma hunt aprendida ainda.</div>';
+      const message = allHunts.length
+        ? 'Nenhuma hunt corresponde ao filtro selecionado.'
+        : 'O catálogo oficial ainda não carregou. Clique em Hunts para tentar novamente.';
+      bestiarySetStatus(message, 'warn');
+      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">' + bestiaryHtml(message) + '</div>';
       return;
     }
     if (!allMonsters.length) {
-      bestiarySetStatus('Essa hunt está no histórico, mas seus monstros ainda não foram lidos. Entre nela uma vez.', 'warn');
-      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Aguardando o Hunt Analyzer mostrar os monstros desta hunt.</div>';
+      bestiarySetStatus('Os monstros desta hunt ainda não foram carregados pelo jogo.', 'warn');
+      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Clique em Hunts para recarregar o catálogo oficial.</div>';
       return;
     }
     if (!bestiarySyncing) {
       if (done === allMonsters.length) {
         bestiarySetStatus('Bestiário completo para todos os monstros desta hunt.', 'ok');
       } else if (synced) {
-        bestiarySetStatus(done + ' de ' + allMonsters.length + ' monstros completos. Clique em Sincronizar para atualizar.', '');
+        bestiarySetStatus(done + ' de ' + allMonsters.length + ' completos · faltam ' + bestiaryFmt(pendingKills) + ' mortes.', '');
       } else {
-        bestiarySetStatus('Monstros reconhecidos. Clique em Sincronizar para ler a Stonegypedia oficial.', 'warn');
+        bestiarySetStatus('Monstros reconhecidos. Clique em Sincronizar para ler o progresso oficial.', 'warn');
       }
     }
 
@@ -8713,11 +8935,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
             bestiaryFmt(s.current) + '/' + bestiaryFmt(s.target) + '</span>'
           ).join('') + '</div>'
         : '';
+      const pending = Number(m.finalTarget) > 0
+        ? '<span> · faltam <b>' + bestiaryFmt(Math.max(0, Number(m.pendingKills) || 0)) + '</b></span>'
+        : '';
       const error = m.notFound ? '<span> · não localizado na Stonegypedia</span>' : '';
       return '<div class="sah-best-monster' + cls + '">' +
         '<div class="sah-best-row"><span class="sah-best-name">' + bestiaryHtml(m.name) + '</span>' +
         '<span class="sah-best-badge">' + badge + '</span></div>' +
-        '<div class="sah-best-kills">Mortes totais: <b>' + bestiaryFmt(m.totalKills) + '</b>' + error + '</div>' +
+        '<div class="sah-best-kills">Mortes: <b>' + bestiaryFmt(m.totalKills) + '</b>' + pending + error + '</div>' +
         stageHtml + '</div>';
     }).join('');
   }
@@ -8809,9 +9034,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       ? [...progressParent.children].find((el) => el.tagName === 'P' && /^\s*[\d.]+\s*$/.test(el.textContent || ''))
       : null;
     const totalKills = totalNode ? bestiaryInt(totalNode.textContent) : null;
+    const finalTarget = stages.reduce((max, stage) => Math.max(max, Number(stage.target) || 0), 0);
     return {
       name,
       totalKills,
+      finalTarget,
+      pendingKills: finalTarget > 0 && totalKills != null ? Math.max(0, finalTarget - totalKills) : 0,
       stages,
       completed: stages.length > 0 && stages.every((s) => s.current >= s.target),
       notFound: false,
@@ -8821,6 +9049,11 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   async function bestiarySyncSelected() {
     if (bestiarySyncing) return;
+    // Caminho principal: lê tudo de uma vez do estado oficial já carregado.
+    if (await bestiarySyncFromGame({ announce: true })) return;
+
+    // Fallback de compatibilidade caso uma atualização do jogo altere os
+    // módulos internos: abre a Stonegypedia e lê somente a hunt selecionada.
     bestiaryLearnCurrentHunt();
     const entry = bestiaryStore()[bestiarySelectedKey];
     const monsters = entry && entry.monsters ? Object.values(entry.monsters).filter(Boolean) : [];
@@ -8870,10 +9103,14 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   if (!bot._bestiaryWatchInstalled) {
     bot._bestiaryWatchInstalled = true;
+    setTimeout(() => bestiarySyncFromGame({ announce: false }), 1200);
     setInterval(() => {
       if (bestiarySyncing) return;
       bestiaryLearnCurrentHunt();
-    }, 2000);
+      // Mantém o progresso atualizado mesmo sem abrir Stonegypedia. O custo é
+      // baixo: apenas lê objetos já existentes na memória do jogo.
+      if (!bestiaryRuntimeSyncing) bestiarySyncFromGame({ announce: false });
+    }, 10000);
   }
 
   function presetStorageKey(hunt, voc) {

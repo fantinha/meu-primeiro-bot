@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
-  "message": "Nova aba Bestiário: cruza automaticamente os monstros de cada hunt com as mortes e os marcos oficiais da Stonegypedia do personagem.",
+  "version": "1.8.0",
+  "message": "Bestiário por hunt aprimorado: carrega todas as hunts e monstros oficiais e sincroniza automaticamente mortes, pendências e conclusão sem precisar entrar nas hunts.",
   "bot": "bot.js"
 }
