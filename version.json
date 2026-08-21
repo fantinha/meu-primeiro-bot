@@ -1,5 +1,5 @@
 {
-  "version": "1.6.2",
-  "message": "Impede que mortes antigas troquem de criatura quando o jogo reutiliza IDs, mantendo nomes e estatísticas de turnos estáveis.",
+  "version": "1.7.0",
+  "message": "Nova aba Bestiário: cruza automaticamente os monstros de cada hunt com as mortes e os marcos oficiais da Stonegypedia do personagem.",
   "bot": "bot.js"
 }

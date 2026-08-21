@@ -223,6 +223,9 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
     huntPresets: {},
     presetAutoApply: false, // aplicar preset ao entrar na hunt (só se bot ligado)
     huntMetrics: {}, // chave "hunt|solo" / "hunt|party" → { huntName, mode, runs[] }
+    // Catálogo aprendido diretamente do Hunt Analyzer + progresso oficial lido
+    // em Stonegypedia > Bestiary. Fica no perfil para acompanhar o personagem.
+    bestiaryHunts: {},
   };
 
   // store = { active, profiles: { nome: cfg }, chars: { nickLower: nome } }
@@ -2846,7 +2849,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
 
   // Versão do bot (mantenha em sincronia com o manifest). É comparada com a
   // versão publicada no servidor para avisar quando estiver desatualizada.
-  const VERSION = '1.4.8';
+  const VERSION = '1.5.0';
 
   // URL da logo. No modo code-streaming (userScript) não existe chrome.runtime,
   // então o loader injeta a logo como data-URI em globalThis.__STONER_LOGO__.
@@ -3086,18 +3089,81 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
           overflow-y: auto; font-size: 10px; color: #8a8474; }
 
         #stonegy-auto-hunt .sah-tabs {
-          display: flex; border-bottom: 1px solid #3c3c41;
+          display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+          border-bottom: 1px solid #3c3c41;
         }
         #stonegy-auto-hunt .sah-tab-btn {
-          flex: 1; margin: 0; padding: 7px 4px; border-radius: 0;
+          min-width: 0; margin: 0; padding: 6px 2px; border-radius: 0;
           background: #1a1c20; color: #9a917a; font-weight: bold;
-          font-size: 10px; letter-spacing: .02em;
+          font-size: 9.5px; letter-spacing: 0; white-space: nowrap;
         }
         #stonegy-auto-hunt .sah-tab-btn.active {
           background: #14161a; color: #c89b3c; box-shadow: inset 0 -2px 0 #c89b3c;
         }
         #stonegy-auto-hunt .sah-tab-content { display: none; }
         #stonegy-auto-hunt .sah-tab-content.active { display: block; }
+        #stonegy-auto-hunt .sah-best-head {
+          display:flex; align-items:center; justify-content:space-between; gap:8px;
+          margin-bottom:7px;
+        }
+        #stonegy-auto-hunt .sah-best-head .sah-section-title { flex:1; margin:2px 0 0; }
+        #stonegy-auto-hunt .sah-best-sync {
+          width:auto; flex-shrink:0; margin:0; padding:5px 9px;
+          background:#2d5f3b; color:#dff4e5; border:1px solid #4f8e60;
+        }
+        #stonegy-auto-hunt .sah-best-sync:hover { background:#377349; }
+        #stonegy-auto-hunt .sah-best-sync:disabled { opacity:.55; cursor:wait; }
+        #stonegy-auto-hunt .sah-best-tools { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+        #stonegy-auto-hunt .sah-best-tools input,
+        #stonegy-auto-hunt .sah-best-tools select { min-width:0; }
+        #stonegy-auto-hunt .sah-best-hint {
+          margin:6px 0 8px; color:#7f796b; font-size:9.5px; line-height:1.4;
+        }
+        #stonegy-auto-hunt .sah-best-status {
+          margin:7px 0; padding:6px 7px; border:1px solid #29333a; border-radius:3px;
+          background:#0b1116; color:#8d99a0; font-size:10px; line-height:1.35;
+        }
+        #stonegy-auto-hunt .sah-best-status.ok { border-color:#315c3c; color:#7fce91; }
+        #stonegy-auto-hunt .sah-best-status.warn { border-color:#6b5528; color:#d1aa58; }
+        #stonegy-auto-hunt .sah-best-summary {
+          display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:7px;
+        }
+        #stonegy-auto-hunt .sah-best-stat {
+          padding:6px 4px; text-align:center; border:1px solid #30343a;
+          border-radius:3px; background:#111419; color:#8e8879; font-size:9px;
+        }
+        #stonegy-auto-hunt .sah-best-stat b { display:block; color:#e0bc65; font-size:14px; }
+        #stonegy-auto-hunt .sah-best-list {
+          display:flex; flex-direction:column; gap:5px; max-height:330px; overflow:auto;
+        }
+        #stonegy-auto-hunt .sah-best-monster {
+          padding:7px 8px; border:1px solid #30343a; border-radius:4px; background:#0d1014;
+        }
+        #stonegy-auto-hunt .sah-best-monster.done { border-color:#315c3c; background:#0d1611; }
+        #stonegy-auto-hunt .sah-best-monster.pending { border-color:#6b5528; }
+        #stonegy-auto-hunt .sah-best-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        #stonegy-auto-hunt .sah-best-name {
+          min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+          color:#ddd1b1; font-size:11px; font-weight:700;
+        }
+        #stonegy-auto-hunt .sah-best-badge {
+          flex-shrink:0; padding:2px 6px; border-radius:9px; background:#262a2f;
+          color:#999184; font-size:8.5px; font-weight:700;
+        }
+        #stonegy-auto-hunt .sah-best-monster.done .sah-best-badge { background:#234a2d; color:#91d9a0; }
+        #stonegy-auto-hunt .sah-best-monster.pending .sah-best-badge { background:#5c481f; color:#e4bd65; }
+        #stonegy-auto-hunt .sah-best-kills { margin-top:4px; color:#8d887b; font-size:9.5px; }
+        #stonegy-auto-hunt .sah-best-kills b { color:#e0bc65; }
+        #stonegy-auto-hunt .sah-best-stages { display:flex; gap:4px; margin-top:5px; }
+        #stonegy-auto-hunt .sah-best-stage {
+          flex:1; padding:3px 2px; text-align:center; border-radius:2px;
+          background:#24282d; color:#858178; font-size:8.5px;
+        }
+        #stonegy-auto-hunt .sah-best-stage.done { background:#234a2d; color:#9bd8a6; }
+        #stonegy-auto-hunt .sah-best-empty {
+          padding:14px 9px; text-align:center; color:#716c61; font-size:10px;
+          border:1px dashed #30343a; border-radius:4px;
+        }
         #stonegy-auto-hunt .sah-boss-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
         #stonegy-auto-hunt .sah-boss-card {
           padding:10px; background:#0c0d10; border:1px solid #3c3c41; border-radius:4px;
@@ -3520,6 +3586,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         <button class="sah-tab-btn active" data-tab="hunt">HUNT</button>
         <button class="sah-tab-btn" data-tab="boss">BOSSES</button>
         <button class="sah-tab-btn" data-tab="analyzer">ANALYZER</button>
+        <button class="sah-tab-btn" data-tab="bestiary">BESTIÁRIO</button>
         <button class="sah-tab-btn" data-tab="chat">CHAT</button>
         <button class="sah-tab-btn" data-tab="prot">ITENS</button>
         <button class="sah-tab-btn" data-tab="stamina">STAMINA</button>
@@ -3640,6 +3707,20 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         </div>
         <div class="sah-tab-content" data-tab-content="analyzer">
           <div class="sah-da-container"></div>
+        </div>
+        <div class="sah-tab-content" data-tab-content="bestiary">
+          <div class="sah-best-head">
+            <div class="sah-section-title">Bestiário por hunt</div>
+            <button type="button" class="sah-best-sync">Sincronizar</button>
+          </div>
+          <div class="sah-best-hint">Os monstros vêm do Hunt Analyzer. As mortes e os marcos vêm do Bestiary oficial do personagem ativo. Ao entrar numa hunt pela primeira vez, ela é aprendida automaticamente.</div>
+          <div class="sah-best-tools">
+            <select class="sah-best-hunt" title="Hunt acompanhada"></select>
+            <input type="search" class="sah-best-search" placeholder="Filtrar monstro…" autocomplete="off">
+          </div>
+          <div class="sah-best-status">Aguardando uma hunt reconhecida.</div>
+          <div class="sah-best-summary"></div>
+          <div class="sah-best-list"></div>
         </div>
         <div class="sah-tab-content" data-tab-content="config">
           <div class="sah-section-title">Automação</div>
@@ -3940,6 +4021,12 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       bossEnterBtns: root.querySelectorAll('.sah-boss-enter[data-boss-id]'),
       bossStatus: root.querySelector('.sah-boss-status'),
       daContainer: root.querySelector('.sah-da-container'),
+      bestiaryHunt: root.querySelector('.sah-best-hunt'),
+      bestiarySearch: root.querySelector('.sah-best-search'),
+      bestiarySync: root.querySelector('.sah-best-sync'),
+      bestiaryStatus: root.querySelector('.sah-best-status'),
+      bestiarySummary: root.querySelector('.sah-best-summary'),
+      bestiaryList: root.querySelector('.sah-best-list'),
       posSection: root.querySelector('.sah-pos-section'),
       posToggle: root.querySelector('.sah-pos-toggle'),
       posToggleLabel: root.querySelector('.sah-pos-toggle-label'),
@@ -4052,6 +4139,7 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       updateSavedPosDisplay();
       renderPositionGrid();
       renderProtectTab();
+      renderBestiaryTab();
     }
     ui.loadFromCfg = applyCfgToUI;
     applyCfgToUI();
@@ -4611,8 +4699,21 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
         const panelBody = root.querySelector('.sah-body');
         if (panelBody) panelBody.scrollTop = 0;
         if (posTabActive) renderPositionGrid();
+        if (tab === 'bestiary') {
+          bestiaryLearnCurrentHunt();
+          renderBestiaryTab();
+        }
       });
     });
+
+    if (ui.bestiaryHunt) {
+      ui.bestiaryHunt.addEventListener('change', () => {
+        bestiarySelectedKey = ui.bestiaryHunt.value || '';
+        renderBestiaryTab();
+      });
+    }
+    if (ui.bestiarySearch) ui.bestiarySearch.addEventListener('input', renderBestiaryTab);
+    if (ui.bestiarySync) ui.bestiarySync.addEventListener('click', bestiarySyncSelected);
 
     ui.bossEnterBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -8435,6 +8536,344 @@ globalThis.__STONER_LOGO__="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAA
       return String(cfg.huntName).replace(/\s+/g, ' ').trim();
     }
     return '';
+  }
+
+  // ------------------------------------------------------------------
+  // Bestiário por hunt
+  // ------------------------------------------------------------------
+  // A composição da hunt vem do painel "Monsters" do Hunt Analyzer. O
+  // progresso vem exclusivamente da Stonegypedia oficial do personagem:
+  // total de mortes + os três marcos expostos em aria-label pelo jogo.
+  let bestiarySyncing = false;
+  let bestiarySelectedKey = '';
+
+  function bestiaryHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function bestiaryInt(value) {
+    const n = parseInt(String(value == null ? '' : value).replace(/\D/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function bestiaryFmt(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toLocaleString('pt-BR') : '—';
+  }
+
+  function bestiaryStore() {
+    if (!cfg.bestiaryHunts || typeof cfg.bestiaryHunts !== 'object' || Array.isArray(cfg.bestiaryHunts)) {
+      cfg.bestiaryHunts = {};
+    }
+    return cfg.bestiaryHunts;
+  }
+
+  function bestiaryCurrentEntry() {
+    const hunt = detectCurrentHuntName();
+    if (!hunt) return null;
+    return bestiaryStore()[normalizeHuntKey(hunt)] || null;
+  }
+
+  function bestiaryLearnCurrentHunt() {
+    try {
+      if (!inHunt()) return false;
+      const hunt = detectCurrentHuntName();
+      const live = daScrapeMonsterKills();
+      if (!hunt || !live || !live.size) return false;
+      const all = bestiaryStore();
+      const key = normalizeHuntKey(hunt);
+      const old = all[key] && typeof all[key] === 'object' ? all[key] : {};
+      const oldMonsters = old.monsters && typeof old.monsters === 'object' ? old.monsters : {};
+      const monsters = { ...oldMonsters };
+      let changed = !old.name || old.name !== hunt;
+      for (const name of live.keys()) {
+        const mk = normalizeHuntKey(name);
+        if (!monsters[mk]) {
+          monsters[mk] = { name };
+          changed = true;
+        } else if (monsters[mk].name !== name) {
+          monsters[mk].name = name;
+          changed = true;
+        }
+      }
+      if (!changed) return false;
+      all[key] = { ...old, name: hunt, monsters, learnedAt: old.learnedAt || Date.now(), updatedAt: Date.now() };
+      bestiarySelectedKey = key;
+      saveConfig();
+      renderBestiaryTab();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function bestiaryKnownHunts() {
+    const out = new Map();
+    const saved = bestiaryStore();
+    for (const [key, value] of Object.entries(saved)) {
+      if (!value || typeof value !== 'object') continue;
+      out.set(key, {
+        key,
+        name: String(value.name || key),
+        monsters: value.monsters && typeof value.monsters === 'object' ? value.monsters : {},
+        saved: value,
+      });
+    }
+    const extras = [cfg.huntName, ...(Array.isArray(cfg.recentHunts) ? cfg.recentHunts : [])];
+    for (const raw of extras) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      const key = normalizeHuntKey(name);
+      if (!out.has(key)) out.set(key, { key, name, monsters: {}, saved: null });
+    }
+    const current = inHunt() ? normalizeHuntKey(detectCurrentHuntName()) : '';
+    return [...out.values()].sort((a, b) => {
+      if (a.key === current) return -1;
+      if (b.key === current) return 1;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }
+
+  function bestiarySetStatus(text, type) {
+    if (!ui || !ui.bestiaryStatus) return;
+    ui.bestiaryStatus.textContent = text;
+    ui.bestiaryStatus.className = 'sah-best-status' + (type ? ' ' + type : '');
+  }
+
+  function renderBestiaryTab() {
+    if (!ui || !ui.bestiaryHunt || !ui.bestiaryList) return;
+    const hunts = bestiaryKnownHunts();
+    const currentKey = inHunt() ? normalizeHuntKey(detectCurrentHuntName()) : '';
+    const previous = bestiarySelectedKey || ui.bestiaryHunt.value || currentKey;
+    ui.bestiaryHunt.innerHTML = '';
+    for (const hunt of hunts) {
+      const option = document.createElement('option');
+      option.value = hunt.key;
+      option.textContent = hunt.name;
+      ui.bestiaryHunt.appendChild(option);
+    }
+    if (hunts.some((h) => h.key === previous)) bestiarySelectedKey = previous;
+    else if (hunts.some((h) => h.key === currentKey)) bestiarySelectedKey = currentKey;
+    else bestiarySelectedKey = hunts[0] ? hunts[0].key : '';
+    ui.bestiaryHunt.value = bestiarySelectedKey;
+
+    const selected = hunts.find((h) => h.key === bestiarySelectedKey);
+    const allMonsters = selected ? Object.values(selected.monsters || {}).filter(Boolean) : [];
+    const query = String(ui.bestiarySearch && ui.bestiarySearch.value || '').trim().toLowerCase();
+    const monsters = allMonsters
+      .filter((m) => !query || String(m.name || '').toLowerCase().includes(query))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
+    const synced = allMonsters.filter((m) => Array.isArray(m.stages) && m.stages.length).length;
+    const done = allMonsters.filter((m) => m.completed === true).length;
+
+    if (ui.bestiarySync) {
+      ui.bestiarySync.disabled = bestiarySyncing || !allMonsters.length;
+      ui.bestiarySync.textContent = bestiarySyncing ? 'Lendo…' : 'Sincronizar';
+    }
+    if (ui.bestiarySummary) {
+      ui.bestiarySummary.innerHTML =
+        '<div class="sah-best-stat"><b>' + allMonsters.length + '</b>monstros</div>' +
+        '<div class="sah-best-stat"><b>' + done + '</b>completos</div>' +
+        '<div class="sah-best-stat"><b>' + Math.max(0, allMonsters.length - synced) + '</b>não lidos</div>';
+    }
+
+    if (!selected) {
+      bestiarySetStatus('Entre em uma hunt para a extensão reconhecer seus monstros.', 'warn');
+      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Nenhuma hunt aprendida ainda.</div>';
+      return;
+    }
+    if (!allMonsters.length) {
+      bestiarySetStatus('Essa hunt está no histórico, mas seus monstros ainda não foram lidos. Entre nela uma vez.', 'warn');
+      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Aguardando o Hunt Analyzer mostrar os monstros desta hunt.</div>';
+      return;
+    }
+    if (!bestiarySyncing) {
+      if (done === allMonsters.length) {
+        bestiarySetStatus('Bestiário completo para todos os monstros desta hunt.', 'ok');
+      } else if (synced) {
+        bestiarySetStatus(done + ' de ' + allMonsters.length + ' monstros completos. Clique em Sincronizar para atualizar.', '');
+      } else {
+        bestiarySetStatus('Monstros reconhecidos. Clique em Sincronizar para ler a Stonegypedia oficial.', 'warn');
+      }
+    }
+
+    if (!monsters.length) {
+      ui.bestiaryList.innerHTML = '<div class="sah-best-empty">Nenhum monstro encontrado com esse filtro.</div>';
+      return;
+    }
+    ui.bestiaryList.innerHTML = monsters.map((m) => {
+      const stages = Array.isArray(m.stages) ? m.stages : [];
+      const cls = m.completed === true ? ' done' : (stages.length ? ' pending' : '');
+      const badge = m.completed === true ? 'COMPLETO' : (stages.length ? 'EM ANDAMENTO' : 'NÃO LIDO');
+      const stageHtml = stages.length
+        ? '<div class="sah-best-stages">' + stages.map((s) =>
+            '<span class="sah-best-stage' + (s.current >= s.target ? ' done' : '') + '">' +
+            bestiaryFmt(s.current) + '/' + bestiaryFmt(s.target) + '</span>'
+          ).join('') + '</div>'
+        : '';
+      const error = m.notFound ? '<span> · não localizado na Stonegypedia</span>' : '';
+      return '<div class="sah-best-monster' + cls + '">' +
+        '<div class="sah-best-row"><span class="sah-best-name">' + bestiaryHtml(m.name) + '</span>' +
+        '<span class="sah-best-badge">' + badge + '</span></div>' +
+        '<div class="sah-best-kills">Mortes totais: <b>' + bestiaryFmt(m.totalKills) + '</b>' + error + '</div>' +
+        stageHtml + '</div>';
+    }).join('');
+  }
+
+  function bestiaryRoot() {
+    const title = [...document.querySelectorAll('p')]
+      .find((el) => visible(el) && /^stonegypedia$/i.test(String(el.textContent || '').trim()));
+    return title ? title.parentElement : null;
+  }
+
+  function bestiaryExact(root, selector, text) {
+    const want = String(text || '').trim().toLowerCase();
+    return [...(root ? root.querySelectorAll(selector) : [])]
+      .find((el) => visible(el) && String(el.textContent || '').trim().toLowerCase() === want) || null;
+  }
+
+  async function bestiaryWaitFor(test, timeoutMs) {
+    const until = Date.now() + (timeoutMs || 2500);
+    while (Date.now() < until) {
+      try {
+        const value = test();
+        if (value) return value;
+      } catch (_) {}
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    return null;
+  }
+
+  async function bestiaryOpenOfficial() {
+    let root = bestiaryRoot();
+    if (root) return { root, openedByUs: false };
+    const book = [...document.querySelectorAll('svg[viewBox="0 0 33 27"]')].find(visible);
+    if (!book) throw new Error('atalho da Stonegypedia não encontrado');
+    click(book);
+    root = await bestiaryWaitFor(bestiaryRoot, 3000);
+    if (!root) throw new Error('Stonegypedia não abriu');
+    return { root, openedByUs: true };
+  }
+
+  function bestiaryCloseOfficial(root) {
+    let shell = root;
+    for (let i = 0; i < 7 && shell; i++, shell = shell.parentElement) {
+      const close = shell.querySelector && shell.querySelector('svg[viewBox="0 0 14 14"]');
+      if (close && visible(close)) {
+        click(close);
+        return;
+      }
+    }
+  }
+
+  async function bestiaryReadMonster(root, name) {
+    const nav = bestiaryExact(root, 'p', 'Bestiary');
+    if (!nav) throw new Error('aba Bestiary não encontrada');
+    click(nav);
+    // Items, Bestiary e o detalhe usam o mesmo placeholder. Dá tempo ao React
+    // para trocar a tela antes de capturar o input, evitando pesquisar em Items.
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const input = await bestiaryWaitFor(
+      () => root.querySelector('input[placeholder="Type to search"]'),
+      2000
+    );
+    if (!input) throw new Error('busca do Bestiary não encontrada');
+    setReactInput(input, name);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    const row = await bestiaryWaitFor(() => bestiaryExact(root, 'p', name), 2500);
+    if (!row) return { name, notFound: true, syncedAt: Date.now() };
+    click(row);
+
+    const detail = await bestiaryWaitFor(() => {
+      const names = [...root.querySelectorAll('p')]
+        .filter((el) => visible(el) && String(el.textContent || '').trim().toLowerCase() === name.toLowerCase());
+      for (const el of names) {
+        const card = el.parentElement && el.parentElement.parentElement;
+        if (!card) continue;
+        const markers = [...card.querySelectorAll('[aria-label]')]
+          .filter((node) => /^\s*[\d.]+\s*\/\s*[\d.]+\s*$/.test(node.getAttribute('aria-label') || ''));
+        if (markers.length) return { card, markers };
+      }
+      return null;
+    }, 2500);
+    if (!detail) return { name, notFound: true, syncedAt: Date.now() };
+
+    const stages = detail.markers.map((node) => {
+      const parts = String(node.getAttribute('aria-label') || '').split('/');
+      return { current: bestiaryInt(parts[0]) || 0, target: bestiaryInt(parts[1]) || 0 };
+    }).filter((s) => s.target > 0);
+    const progressParent = detail.markers[0] && detail.markers[0].parentElement;
+    const totalNode = progressParent
+      ? [...progressParent.children].find((el) => el.tagName === 'P' && /^\s*[\d.]+\s*$/.test(el.textContent || ''))
+      : null;
+    const totalKills = totalNode ? bestiaryInt(totalNode.textContent) : null;
+    return {
+      name,
+      totalKills,
+      stages,
+      completed: stages.length > 0 && stages.every((s) => s.current >= s.target),
+      notFound: false,
+      syncedAt: Date.now(),
+    };
+  }
+
+  async function bestiarySyncSelected() {
+    if (bestiarySyncing) return;
+    bestiaryLearnCurrentHunt();
+    const entry = bestiaryStore()[bestiarySelectedKey];
+    const monsters = entry && entry.monsters ? Object.values(entry.monsters).filter(Boolean) : [];
+    if (!entry || !monsters.length) {
+      bestiarySetStatus('Entre nessa hunt uma vez para reconhecer os monstros antes de sincronizar.', 'warn');
+      return;
+    }
+    bestiarySyncing = true;
+    renderBestiaryTab();
+    let opened = null;
+    let read = 0;
+    let finalStatus = '';
+    let finalType = '';
+    try {
+      opened = await bestiaryOpenOfficial();
+      for (const monster of monsters) {
+        read += 1;
+        if (ui && ui.bestiarySync) ui.bestiarySync.textContent = read + '/' + monsters.length;
+        bestiarySetStatus('Lendo ' + monster.name + ' na Stonegypedia (' + read + '/' + monsters.length + ')…', '');
+        const result = await bestiaryReadMonster(opened.root, monster.name);
+        const key = normalizeHuntKey(monster.name);
+        entry.monsters[key] = { ...monster, ...result };
+      }
+      entry.lastSyncAt = Date.now();
+      entry.updatedAt = Date.now();
+      saveConfig();
+      renderBestiaryTab();
+      const done = monsters.filter((m) => {
+        const saved = entry.monsters[normalizeHuntKey(m.name)];
+        return saved && saved.completed === true;
+      }).length;
+      finalStatus = 'Sincronização concluída: ' + done + ' de ' + monsters.length + ' completos.';
+      finalType = done === monsters.length ? 'ok' : '';
+      log('Bestiário: ' + entry.name + ' sincronizado (' + done + '/' + monsters.length + ' completos)');
+    } catch (error) {
+      const message = String(error && error.message ? error.message : error);
+      finalStatus = 'Não foi possível sincronizar: ' + message + '.';
+      finalType = 'warn';
+      log('Bestiário: falha ao sincronizar — ' + message);
+    } finally {
+      if (opened && opened.openedByUs) bestiaryCloseOfficial(opened.root);
+      bestiarySyncing = false;
+      renderBestiaryTab();
+      if (finalStatus) bestiarySetStatus(finalStatus, finalType);
+    }
+  }
+
+  if (!bot._bestiaryWatchInstalled) {
+    bot._bestiaryWatchInstalled = true;
+    setInterval(() => {
+      if (bestiarySyncing) return;
+      bestiaryLearnCurrentHunt();
+    }, 2000);
   }
 
   function presetStorageKey(hunt, voc) {
